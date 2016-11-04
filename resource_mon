@@ -1,0 +1,1298 @@
+#!/usr/bin/env python
+"""usage: resource_mon [flags] [install | start | status | restart |
+                             stop | uninstall | version]
+
+Gets the following process-level stats of all the running processes in
+the system/cluster that it has access to:
+ip, uid, pid, ppid, name, pss, uss, rss, vms, swap, num_fds, leader
+, timestamp
+***** Run as sudo to gets stats of all processes including root and all
+other users. *****
+
+Example usages:
+---------------
+Install and uninstall using the following commands:
+resource_mon [--cluster] install | uninstall
+
+Can run in 2 modes:
+1) Foreground process: gets stats once every "interval" seconds "count"
+                       number of times.
+                       Usage: resource_mon [--cluster] [--count=M]
+                                           [--interval=N]
+                                           [--[no]leadership]
+                                           [--output_dir=/home/nutanix]
+                       Writes stats to a new file 'output_dir/
+                       resource_mon.IP_YYYYMMDD_HHMMSS.csv.out' for
+                       each iteration of count.
+
+2) Daemon: gets stats once every "interval" seconds until stopped.
+           Usage: resource_mon [--cluster] [--interval=N]
+                               [--[no]leadership]
+                               [--output_dir=/home/nutanix]
+                               start | status | stop | restart
+           Appends stats to output_dir/resource_mon.csv.out
+
+positional arguments:
+  install    install the executable file to /home/nutanix/bin
+  start      start the daemon
+  status     return the pids of all the processes of the daemon
+             currently running
+  restart    restart the daemom
+  stop       stop the daemon
+  uninstall  remove the file from /home/nutanix/bin
+  version    print version of the program and exit
+"""
+#
+# Copyright (c) 2016 Nutanix Inc. All rights reserved.
+#
+# Author: rohith.subramanyam@nutanix.com
+#
+
+# TODO: Implement archiving when running in foreground process mode
+# with --cluster gflag: resource_mon --cluster.
+# TODO: Check CPU profile.
+
+from __future__ import print_function
+
+assert __name__ == "__main__", "This module should NOT be imported."
+
+__version__ = 0.1
+
+import sys
+sys.path.append("/home/nutanix/bin")
+
+import env  # Add nutanix libraries to sys.path.
+
+import os
+import threading
+import time
+
+from contextlib import contextmanager
+
+import gflags
+
+from util.base import log
+
+genesis_utils = None
+
+FILE_NAME = os.path.basename(__file__)
+try:
+  NUTANIX_LOG_DIR = os.environ["NUTANIX_LOG_DIR"]
+except KeyError:
+  NUTANIX_LOG_DIR = "/home/nutanix/data/logs"
+INSTALL_DIR = "/home/nutanix/bin"
+LOCK_FILE = "/home/nutanix/.%s.lock" % (FILE_NAME)
+NUTANIX_USER = "nutanix"
+DAEMON_CMDLINE_OPTION = "--daemon"
+SELF_MONITOR_CMDLINE_OPTION = "--rm_self_monitor"
+HELP_CMDLINE_OPTION = "-h"
+
+gflags.DEFINE_boolean(name="cluster",
+                      default=False,
+                      help=("Operation is run on the all the CVMs in the "
+                            "cluster."),
+                      short_name="c")
+
+gflags.DEFINE_integer(name="interval",
+                      default=120,
+                      help=("time in seconds between which the process stats "
+                            "are collected. Note that this interval is not "
+                            "guaranteed if each iteration takes more than "
+                            "interval seconds."),
+                      short_name="i")
+
+gflags.DEFINE_integer(name="count",
+                      default=1,
+                      help=("Number of times to collect process stats. Only "
+                            "applicable when running in foreground process "
+                            "mode."),
+                      short_name="n")
+
+gflags.DEFINE_boolean(name="leadership",
+                      default=True,
+                      help=("Adds a boolean column 'leadership' which checks "
+                            "if the nutanix process running on the node is a "
+                            "leader or not."),
+                      short_name="l")
+
+gflags.DEFINE_string(name="output_dir",
+                     default=NUTANIX_LOG_DIR,
+                     help=("Path to the directory where the output files are "
+                           "written"),
+                     short_name="o")
+
+gflags.ADOPT_module_key_flags(log)
+
+FLAGS = gflags.FLAGS
+
+class ResourceMon(object):
+  """Get process stats and write to output file(s)."""
+  def __init__(self, svm_ip):
+    self.__svm_ip = svm_ip
+
+  def __get_process_stats(self, output_file_name=None):
+    """Get process stats once and write to the output file.
+
+    Arguments:
+    output_file_name: append to output_dir/resource_mon.csv.out if
+                      None, else write to output_dir/output_file_name
+    """
+    import csv
+    import psutil
+
+    log.INFO(_tname("Getting process stats"))
+
+    ad_pids = []
+    procs = []
+    epoch = int(time.time())
+    date_time = time.strftime("%Y%m%d_%H%M%S")
+    sys_mem = psutil.virtual_memory()
+    for proc in psutil.process_iter():
+      try:
+        username = proc.username()
+        ppid = proc.ppid()
+        try:
+          name = _get_cmd_name(proc.name(), proc.cmdline(), ppid)
+        except IndexError:
+          name = proc.name()
+
+        # Memory metrics in KB.
+        # rss = sum(pmmap.rss for pmmap in proc.memory_maps()) / 1000
+        rss = proc.memory_info().rss / 1000
+        vms = proc.memory_info().vms / 1000
+        # Use proc.memory_full_info().pss in psutil 4.0.0+
+        pss = sum(pmmap.pss for pmmap in proc.memory_maps()) / 1000
+        # Use proc.memory_full_info().uss in psutil 4.0.0+
+        uss = (sum(pmmap.private_clean for pmmap in proc.memory_maps()) +
+               sum(pmmap.private_dirty for pmmap in proc.memory_maps())) / 1000
+        # Use proc.memory_full_info().swap in psutil 4.0.0+
+        swap = sum(pmmap.swap for pmmap in proc.memory_maps()) / 1000
+
+        num_fds = proc.num_fds()
+        # ios = proc.io_counters()
+
+        # Leadership.
+        if FLAGS.leadership:
+          leader = False
+          try:
+            if self.__watch_py_leaders.get_leaders()[name]:
+              leader = True
+          except KeyError:
+            try:
+              if self.__watch_leaders.get_leaders()[name]:
+                leader = True
+            except KeyError:
+              try:
+                if self.__watch_go_leaders.get_leaders()[name]:
+                  leader = True
+              except KeyError:
+                try:
+                  if proc.name() != "python":
+                    listen_ports = [conn for conn in proc.connections() if
+                                    conn.status == "LISTEN"]
+                    # Check if any listening ports is a leader port.
+                    if [listen_port for listen_port in listen_ports if
+                        listen_port in self.__get_leader_ports()]:
+                      leader = True
+                except ValueError as vee:
+                  # Known issue in psutil 2.1.0:
+                  # https://github.com/giampaolo/psutil/issues/572.
+                  if str(vee) == ("ambiguos inode with multiple PIDs "
+                                  "references"):
+                    pass
+
+      except psutil.AccessDenied:
+        ad_pids.append(proc.pid)
+      except psutil.NoSuchProcess:
+        pass
+      else:
+        proc._username = username
+        proc._ppid = ppid
+        proc._name = name
+        proc._rss = rss
+        proc._vms = vms
+        proc._pss = pss
+        proc._uss = uss
+        proc._swap = swap
+        proc._num_fds = num_fds
+        # proc._ios = ios
+        if FLAGS.leadership:
+          proc._leader = str(leader).upper()
+        proc._timestamp = int(time.time())
+        procs.append(proc)
+
+    log.INFO(_tname("Got stats for %d processes" % len(procs)))
+    if ad_pids:
+      log.WARNING(_tname("Access denied for %d processes" % len(ad_pids)))
+
+    # Sort in descending order of pss.
+    procs.sort(key=lambda proc: proc._pss, reverse=True)
+    if output_file_name is None:
+      output_file = os.path.join(FLAGS.output_dir, "resource_mon.%s_%s.csv.out"
+                                 % (self.__svm_ip, date_time))
+    else:
+      output_file = os.path.join(FLAGS.output_dir, output_file_name)
+    with run_as_nutanix_user():
+      with open(output_file, "ab") as out:
+        # Write some metadata.
+        print("# TIMESTAMP: %s %s" % (epoch, date_time), file=out)
+        print("# Release version: %s" % self.__rel_ver, file=out)
+        print("# System memory: total (kB): %s" % (sys_mem.total / 1000),
+              file=out)
+        print("# available (kB): %s,%s" % (epoch, (sys_mem.available / 1000)),
+              file=out)
+        print("# free (kB): %s,%s" % (epoch, (sys_mem.free / 1000)), file=out)
+
+        # lineterminator="\n" avoids the additional carriage return
+        # being inserted even when opened in binary mode.
+        csv_writer = csv.writer(out, lineterminator="\n")
+
+        # Header.
+        header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", "uss(kB)",
+                  "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "timestamp"]
+        if FLAGS.leadership:
+          # Insert in the 2nd last position before timestamp.
+          header.insert(-1, "leader")
+        csv_writer.writerow(header)
+
+        for proc in procs:
+          row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
+                 proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
+                 proc._swap, proc._num_fds, proc._timestamp]
+          if FLAGS.leadership:
+            # Insert in the 2nd last position before timestamp.
+            row.insert(-1, proc._leader)
+          csv_writer.writerow(row)
+
+    if output_file_name is None:
+      log.INFO(_tname("Wrote %s" % output_file))
+    else:
+      log.INFO(_tname("Appended to %s" % output_file))
+
+  def __get_leader_ports(self):
+    """Return the leader ports from all the leadership watchers."""
+    if not FLAGS.leadership:
+      return []
+    else:
+      return (self.__watch_leaders.get_leader_ports() +
+              self.__watch_py_leaders.get_leader_ports() +
+              self.__watch_go_leaders.get_leader_ports())
+
+  def __setup(self, stop_event=None):
+    """Run all the setup steps required.
+
+    Arguments:
+    stop_event: stop event used to stop the WatchLeaders threads
+    """
+    _make_directories()
+    self.__rel_ver = _get_release_version()
+    if FLAGS.leadership:
+      self.__watch_leaders = WatchLeaders(self.__svm_ip,
+                                          "/appliance/logical/leaders",
+                                          stop_event)
+      self.__watch_py_leaders = WatchPyLeaders(self.__svm_ip,
+                                               "/appliance/logical/pyleaders",
+                                               stop_event)
+      self.__watch_go_leaders = WatchGoLeaders(self.__svm_ip,
+                                               "/appliance/logical/goleaders",
+                                               stop_event)
+      self.__watch_leaders.start()
+      self.__watch_py_leaders.start()
+      self.__watch_go_leaders.start()
+      # Main thread continues to collect the process stats.
+
+  def get_process_stats_count_times(self):
+    """Wrapper around self.__get_process_stats which calls it
+    FLAGS.count times every FLAGS.interval seconds used when running in
+    foreground process mode."""
+    ret_val = True
+
+    # TODO: This is serial, use CommandExecutor to run them in parallel.
+    if FLAGS.cluster:
+      # Get IP addresses of the CVMs in the cluster.
+      svm_ips = genesis_utils.get_svm_ips()
+      if not svm_ips:
+        print("Failed to get CVM IPs in the cluster", file=sys.stderr)
+        sys.exit(1)
+      svm_ips.remove(self.__svm_ip)
+
+      import util.net.ssh_client
+
+      # Get all the gflags passed to the current process.
+      gflag_options = [arg for arg in sys.argv[1:] if arg.startswith("--")]
+      # Remove FLAGS.cluster since we do not want the the process on
+      # other nodes to run in cluster mode as well.
+      try:
+        gflag_options.remove("--cluster")
+      except ValueError:  # Option not passed
+        pass
+
+      # When FLAGS.cluster is True.
+      for svmip in svm_ips:
+        ssh_client = util.net.ssh_client.SSHClient(svmip,
+                                                   FLAGS.svm_default_login)
+        cmd = "%s %s" % (os.path.realpath(__file__), " ".join(gflag_options))
+        if not os.geteuid():  # root.
+          cmd = "sudo %s" % cmd
+        ret, out, err = ssh_client.execute(cmd)
+        if ret:
+          print("%s: failed. ret: %s, out: %s, err: %s"
+                % (svmip, ret, out, err.rstrip("\n")), file=sys.stderr)
+          ret_val = False
+        else:
+          print(out.rstrip("\n"))
+
+    if FLAGS.leadership:
+      stop_event = threading.Event()
+    try:
+      if FLAGS.leadership:
+        self.__setup(stop_event)
+      else:
+        self.__setup()
+
+      last_start_time = 0
+      for count in xrange(FLAGS.count):
+        time_now = time.time()
+        if time_now - last_start_time > FLAGS.interval:
+          last_start_time = time_now
+          self.__get_process_stats()
+          try:
+            # Remaining no. of loops. Don't sleep in the last iteration.
+            if FLAGS.count - (count + 1):
+              time.sleep(last_start_time + FLAGS.interval - time.time())
+          except IOError:  # time.sleep(-n)
+            pass
+    finally:
+      if FLAGS.leadership:
+        stop_event.set()
+        _stop_leadership_watch_threads()
+
+    return ret_val
+
+  def run_loop(self, stop_event):
+    """Wrapper around self.__get_process_stats which calls it every
+    FLAGS.interval seconds until stopped used when running in daemon
+    mode.
+
+    Arguments:
+    stop_event: stop_event used to stop the MainThread and the
+                WatchLeaders threads
+    """
+    if FLAGS.leadership:
+      self.__setup(stop_event)
+    else:
+      self.__setup()
+
+    last_start_time = 0
+    while not stop_event.is_set():
+      time_now = time.time()
+      if time_now - last_start_time > FLAGS.interval:
+        last_start_time = time_now
+        self.__get_process_stats("resource_mon.csv.out")
+        # Check for stop event just before you go to sleep in order to
+        # be more responsive to stop command.
+        if stop_event.is_set():
+          continue
+        try:
+          time.sleep(last_start_time + FLAGS.interval - time.time())
+        except IOError:  # time.sleep(-n)
+          pass
+
+class WatchLeaders(threading.Thread):
+  """Watch the leadership zk nodes and get leaders for C/C++ services.
+  """
+  def __init__(self, svm_ip, leadership_root, stop_event):
+    """Get leaders from leadership_root zk node and watch for changes.
+
+    Arguments:
+    svm_ip: CVM IP address
+    leadership_root: zk node base path
+    stop_event: stop event used to stop the thread
+    """
+    self.svm_ip = svm_ip
+    self.leadership_root = leadership_root
+    self.__stop_event = stop_event
+
+    super(WatchLeaders, self).__init__(name="%s_thread" % os.path.basename(
+        self.leadership_root))
+
+    import re
+    # zk node value regex.
+    self.__leadership_regex = re.compile("Handle: (.*) Currently leader "
+                                         "\(Y/N\): (.*)")
+    # Mapping from zk node name to process name.
+    self.__leadership_zk_path_to_proc_name = {
+        # /appliance/logical/leaders.
+        "alert_manager": ["alert_manager"],
+        "arithmos": ["arithmos"],
+        "cassandra_monitor": ["cassandra_monitor"],
+        "cerebro_master": ["cerebro"],
+        "curator": ["curator"],
+        "insights": ["insights_server"],
+        "nfs_namespace_master": ["stargate"],
+        "nutanix_guest_tools_master": ["nutanix_guest_tools"],
+        "pithos": ["pithos"],
+        "prism_monitor": ["command_monitor"],
+        "zookeeper_monitor": ["zookeeper_monitor"],
+        "apps": ["apps_server"],
+        # /appliance/logical/goleaders.
+        "orion": ["orion"],}
+    # Mapping of leader processes to True.
+    self.leader_services = {}
+    # List of ports used by processes on this node that are leaders.
+    self.__leader_ports = []
+
+    # Event used to watch for changes in leadership_root zk node.
+    self.leadership_changed_event = threading.Event()
+
+  def get_leader(self, zk_session, service_leadership_path, service):
+    """Check service_leadership_path zk node and find if this node is
+    the leader. If yes, update self.leader_services or
+    self.__leader_ports.
+
+    Arguments:
+    zk_session: instance of zeus.zookeeper_session.ZookeeperSession()
+    service_leadership_path: path to zk node to check
+    service: basename of service_leadership_path
+    """
+    # Skip vdisk, iSCSI and Cassandra ring leaders.
+    if (service.startswith("vdisk-") or service.startswith("iscsi-iqn") or
+        len(service) == 60):
+      return
+
+    service_nodes = zk_session.list(service_leadership_path)
+    for service_node in service_nodes:
+      service_node_path = os.path.join(service_leadership_path, service_node)
+      value = zk_session.get(service_node_path)
+      if not value:  # Empty.
+        continue
+      result = self.__leadership_regex.match(value)
+      try:
+        if result.groups()[1].upper() == "YES":
+          leader = result.groups()[0]
+          try:
+            # Ex. 1:- zkcat
+            # /appliance/logical/leaders/curator/n_0000000000
+            # Handle: 10.5.21.248:2010 Currently leader (Y/N): Yes
+            ip_addr = leader.split(":")[0]
+            # Ex. 2:- zkcat /appliance/logical/leaders/
+            # nfs_namespace_master/n_0000000000
+            # Handle: 10.5.21.247:2009+291 Currently leader (Y/N): Yes
+            # Ex. 3:- zkcat /appliance/logical/goleaders/orion/
+            # _c_7a2e00497f9cf108f6e59c244e084623-n_0000000043
+            # 10.1.56.212:2088
+            port = leader.split(":")[1].split("+")[0]
+          except IndexError:
+            # Ex. 4:- zkcat
+            # /appliance/logical/leaders/cassandra_monitor/n_0000000000
+            # Handle: 10.5.21.248 Currently leader (Y/N): Yes
+            port = None
+
+          if ip_addr == self.svm_ip:
+            try:
+              zk_path_to_proc_name = self.__leadership_zk_path_to_proc_name[
+                  service]
+              for proc in zk_path_to_proc_name:
+                self.leader_services[proc] = True
+            except KeyError:
+              log.WARNING(_tname("Service %s in zknode %s not found in "
+                                 "internal metadata. Please raise a JIRA to "
+                                 "add" % (service, service_leadership_path)))
+              self.leader_services[service] = True
+              if port is not None:
+                self.__leader_ports.append(port)
+          break
+      except Exception:
+        import traceback
+        log.ERROR(_tname("Error when parsing '%s' in %s\n%s" %
+                         (value, service_node_path, traceback.format_exc())))
+
+  def run(self):
+    """Run loop of the thread which runs until stopped by the
+    self.__stop_event."""
+    import zeus.zookeeper_session
+
+    with zeus.zookeeper_session.ZookeeperSession(FLAGS.zookeeper_host_port_list
+                                                ) as zk_session:
+      while not self.__stop_event.is_set():
+        self.leadership_changed_event.clear()  # Watch for changes.
+        # Set the self.leadership_changed_event when there is a change
+        # in self.leadership_root zk node.
+        leadership = zk_session.get(self.leadership_root, lambda *args:
+                                    self.leadership_changed_event.set())
+        if leadership is None:
+          error = zk_session.error()
+          log.WARNING(_tname("Error reading from zookeeper node %s: %s" %
+                             (self.leadership_root, error)))
+          # For Ex.:- goleaders on pre-Asterix releases.
+          if error == "no node":
+            log.INFO(_tname("%s node not present. Stopping thread." %
+                            self.leadership_root))
+            break
+          time.sleep(2)
+          continue
+
+        log.INFO(_tname("Updating leaders for %s" % self.leadership_root))
+        for service in zk_session.list(self.leadership_root):
+          service_leadership_path = os.path.join(self.leadership_root,
+                                                 service)
+          self.get_leader(zk_session, service_leadership_path, service)
+        log.INFO(_tname("Leader services: %s" % self.leader_services))
+        self.leadership_changed_event.wait()
+
+  def get_leaders(self):
+    """Return the leader services."""
+    return self.leader_services
+
+  def get_leader_ports(self):
+    """Return the leader ports."""
+    return self.__leader_ports
+
+class WatchPyLeaders(WatchLeaders):
+  """Watch the leadership zk nodes and get leaders for python services.
+  """
+  def __init__(self, svm_ip, leadership_root, stop_event):
+    """Get leaders from leadership_root zk node and watch for changes.
+
+    Arguments:
+    svm_ip: CVM IP address
+    leadership_root: zk node base path
+    stop_event: stop event used to stop the thread
+    """
+    super(WatchPyLeaders, self).__init__(svm_ip, leadership_root, stop_event)
+
+    self.__node_uuid = genesis_utils.get_node_uuid()
+    if self.__node_uuid is None:
+      log.FATAL(_tname("Failed to get node UUID"))
+
+    self.__leadership_zk_path_to_proc_name = {
+        # /appliance/logical/pyleaders.
+        "abac_master": ["abac"],
+        "acropolis_master": ["acropolis"],
+        "aplos_engine": ["aplos", "aplos_engine"],
+        "aplos_leader": ["uwsgi"],
+        "aplos_signer_config_gen": [],
+        "aplos_spec_ha": [],
+        "aplos_stats_publisher": ["aplos", "aplos_engine"],
+        "cassandra_init_lock": ["cassandra_monitor"],
+        "ergon_master": ["ergon"],
+        "genesis_cluster_manager": ["genesis"],
+        "genesis_deployment_leader": ["genesis"],
+        "health_scheduler_master": ["health_server"],
+        "lazan_master": ["lazan"],
+        "lcm_leader": ["genesis"],
+        "minerva_service": ["minerva"],
+        "ntp": ["health_server"],
+        "plugin_config_lock": ["health_server"],
+        "stats_aggregator_init": ["arithmos"],
+        "uhura_master": ["uhura"],}
+
+  def get_leader(self, zk_session, service_leadership_path, service):
+    """Check service_leadership_path zk node and find if this node is
+    the leader. If yes, update self.leader_services.
+
+    Arguments:
+    zk_session: instance of zeus.zookeeper_session.ZookeeperSession()
+    service_leadership_path: path to zk node to check
+    service: basename of service_leadership_path
+    """
+    import socket
+    try:
+      service_node = zk_session.list(service_leadership_path)[0]
+      service_node_path = os.path.join(service_leadership_path, service_node)
+      value = zk_session.get(service_node_path)
+      ip_addr = None
+      if not value:  # Empty.
+        # Ex.:- $ zkcat
+        # /appliance/logical/pyleaders/aplos_engine/n_0000000073
+        # $
+        return
+      try:
+        # Ex.:- zkcat
+        # /appliance/logical/pyleaders/genesis_cluster_manager/
+        # n_0000000000
+        # 10.5.21.246
+        _ = socket.inet_aton(value)
+      except socket.error:
+        # Ex.:- zkcat
+        # /appliance/logical/pyleaders/acropolis_master/n_0000000000
+        # fccd62b5-1b73-48b9-a292-9b78339b8915
+        node_uuid = value
+      else:
+        ip_addr = value
+
+      leader = False
+      if ip_addr is not None:
+        if ip_addr == self.svm_ip:
+          leader = True
+      else:
+        if node_uuid == self.__node_uuid:
+          leader = True
+      if leader:
+        try:
+          zk_path_to_proc_name = self.__leadership_zk_path_to_proc_name[
+              service]
+        except KeyError:
+          log.WARNING(_tname("Service %s in zknode %s not found in internal "
+                             "metadata. Please raise a JIRA to add" %
+                             (service, service_leadership_path)))
+          self.leader_services[service] = True
+        for proc in zk_path_to_proc_name:
+          self.leader_services[proc] = True
+
+    except IndexError:
+      log.DEBUG(_tname("No zk children in %s" % service_leadership_path))
+    # Do not want an error while parsing one zknode to stop the thread.
+    except Exception:
+      import traceback
+      log.ERROR(_tname("Error when parsing %s\n%s" %
+                       (service_leadership_path, traceback.format_exc())))
+
+class WatchGoLeaders(WatchLeaders):
+  """Watch the leadership zk nodes and get leaders for python services.
+  """
+  def __init__(self, svm_ip, leadership_root, stop_event):
+    """Get leaders from leadership_root zk node and watch for changes.
+
+    Arguments:
+    svm_ip: CVM IP address
+    leadership_root: zk node base path
+    stop_event: stop event used to stop the thread
+    """
+    super(WatchGoLeaders, self).__init__(svm_ip, leadership_root, stop_event)
+
+    self.__leadership_zk_path_to_proc_name = {
+        # /appliance/logical/goleaders.
+        "orion": ["orion"],}
+
+  def get_leader(self, zk_session, service_leadership_path, service):
+    """Check service_leadership_path zk node and find if this node is
+    the leader. If yes, update self.leader_services or
+    self.__leader_ports.
+
+    Arguments:
+    zk_session: instance of zeus.zookeeper_session.ZookeeperSession()
+    service_leadership_path: path to zk node to check
+    service: basename of service_leadership_path
+    """
+    try:
+      service_node = zk_session.list(service_leadership_path)[0]
+      service_node_path = os.path.join(service_leadership_path, service_node)
+      value = zk_session.get(service_node_path)
+      # Ex.:- zkcat /appliance/logical/goleaders/orion/
+      # _c_458fc5b71c1dd0ed29a3f6daf37134d6-n_0000000005
+      # 10.136.68.31:2088
+      if not value:
+        return
+      ip_addr = value.split(":")[0]
+      try:
+        port = value.split(":")[1].split("+")[0]
+      except IndexError:
+        port = None
+      if ip_addr == self.svm_ip:
+        try:
+          zk_path_to_proc_name = self.__leadership_zk_path_to_proc_name[
+              service]
+          for proc in zk_path_to_proc_name:
+            self.leader_services[proc] = True
+        except KeyError:
+          log.WARNING(_tname("Service %s in zknode %s not found in internal"
+                             " metadata. Please raise a JIRA to add" %
+                             (service, service_leadership_path)))
+          self.leader_services[service] = True
+          if port is not None:
+            self.__leader_ports.append(port)
+    except IndexError:
+      log.DEBUG(_tname("No zk children in %s" % service_leadership_path))
+    # Do not want an error while parsing one zknode to stop the thread.
+    except Exception:
+      import traceback
+      log.ERROR(_tname("Error when parsing %s\n%s" %
+                       (service_leadership_path, traceback.format_exc())))
+
+def _get_cmd_name(name, cmdline, ppid):
+  """From /proc/<pid>/cmdline, return the name of the main program.
+  Ex:- get 'genesis' from 'python -O
+  /usr/local/nutanix/cluster/bin/genesis --foreground=true'
+
+  Arguments:
+  name: name (Ex:- python)
+  cmdline: contents of /proc/<pid>/cmdline as a list. Ex:- ['python',
+           '-O', '/usr/local/nutanix/cluster/bin/genesis',
+           '--foreground=true']
+  ppid: parent pid
+  """
+  if name == "bash" or name == "sh":
+    if any("-" in arg and "c" in arg for arg in cmdline):
+      # Associate all shell processes started by
+      # cluster.service.service_utils.start_service with the service
+      # name as well and not just shell.
+      # If there is a -c option, command is the last argument.
+      # Get shell_genesis from ['/bin/bash', '-lc',
+      # '/usr/local/nutanix/cluster/bin/genesis --foreground=true
+      # --genesis_self_monitoring=false --logtostderr
+      # |& /home/nutanix/bin/logpipe -o
+      # /home/nutanix/data/logs/genesis.out'].
+      cmd = cmdline[-1].split()
+      name = os.path.basename(cmd[0])
+      if name == "python":
+        # name can still be python in the case of:
+        # ['/bin/bash', '-lc',
+        # 'python /home/nutanix/ncc/bin/health_server.py
+        # --update_plugin_config=true --log_plugin_output=true
+        # --logtostderr=true |& /home/nutanix/bin/logpipe -o
+        # /home/nutanix/data/logs/health_server.log -s 128; exit
+        # ${PIPESTATUS[0]}']
+        name = os.path.basename([arg for arg in cmd[1:] if not
+                                 arg.startswith("-")][0])
+      elif name == "service_monitor":
+        # Ex:- name can still be service_monitor in case of:
+        # ['/bin/bash', '-lc', '/home/nutanix/bin/service_monitor
+        # /home/nutanix/bin/lazan |& /home/nutanix/bin/logpipe -o
+        # /home/nutanix/data/logs/lazan.out']
+        name = os.path.basename([arg for arg in cmd[1:] if not
+                                 arg.startswith("-")][0])
+      # If it is the login shell process for a daemon.
+      # genesis, hades and resource_mon monitors itself.
+      if ppid == 1 or name in ["genesis", "hades", "resource_mon"]:
+        name = "shell_%s" % name
+    else:
+      # Get the name of the shell script.
+      # Ex.:- Get zkServer.sh from ['bash',
+      # '/usr/local/nutanix/zookeeper/bin/zkServer.sh',
+      # 'start-foreground'].
+      # Skip first element (bash) and any element starting with '-'
+      # since its a command-line option. Take the basename of the
+      # first element which is the file name of the shell script.
+      name = os.path.basename([arg for arg in cmdline[1:] if not
+                               arg.startswith("-")][0])
+
+  elif name == "service_monitor":
+    # Associate all service_monitor processes started by
+    # cluster.service.service_utils.start_service with the service name
+    # as well and not just service_monitor.
+    # Ex.:- Get service_monitor_scavenger.py from
+    # ['/home/nutanix/bin/service_monitor',
+    # '/home/nutanix/bin/scavenger.py', '--interval_secs=120',
+    # '--logtostderr=True'].
+    name = "service_monitor_%s" % os.path.basename(cmdline[1])
+
+  elif name == "python":
+    # Get the name of the python main program.
+    # Ex.:- Get 'genesis' from ['python', '-O',
+    # '/usr/local/nutanix/cluster/bin/genesis', '--foreground=true'].
+    # Skip first element (python) and any element starting with '-'
+    # since its a command-line option. Take the basename of the first
+    # element which is the file name of the python program.
+    name = os.path.basename([arg for arg in cmdline[1:] if not
+                             arg.startswith("-")][0])
+
+  elif name == "java":
+    # Get the name of the main Java class.
+    # Ex.:- Get 'QuorumPeerMain' from
+    # ['/usr/lib/jvm/jre-1.8.0/bin/java',
+    # '-Dzookeeper.log.dir=/home/nutanix/data/logs', ..., '-cp',
+    # '/usr/local/nutanix/zookeeper/bin/../build/classes:
+    # /usr/local/nutanix/zookeeper/bin/../lib/zookeeper.jar:...,
+    # '-Xms512M', ...,
+    # 'org.apache.zookeeper.server.quorum.QuorumPeerMain',
+    # '/home/nutanix/config/zookeeper/zoo.cfg'].
+    # Skip first element (java), any element starting with '-' since
+    # its a command-line option and class path arg. Take the name of
+    # the main class.
+    name = [arg for arg in cmdline[1:] if not (arg.startswith("-") or ".jar"
+                                               in arg)][0].split(".")[-1]
+
+  # This has to be an if and not an elif since the python logpipe
+  # implementation of python also has the name python.
+  if name == "logpipe":
+    # Associate all logpipe processes started by
+    # cluster.service.service_utils.start_service with the service name
+    # as well and not just service_monitor.
+    # Get the name of the log file without the extension.
+    log_file = os.path.splitext(os.path.basename(cmdline[-1]))[0]
+    name = "logpipe_%s" % log_file
+
+  return name
+
+@contextmanager
+def run_as_nutanix_user():
+  """Run the body of the context manager as nutanix user when this
+  process is running as root."""
+  # __enter__.
+  original_euid = None
+  if not os.geteuid():  # Running as root.
+    # Preserve the root eids and change to nutanix user.
+    original_egid = os.getegid()
+    original_euid = os.geteuid()
+    import grp
+    import pwd
+    os.setegid(grp.getgrnam(NUTANIX_USER).gr_gid)
+    os.seteuid(pwd.getpwnam(NUTANIX_USER).pw_uid)
+
+  yield
+
+  # __exit__.
+  if original_euid is not None:  # Running as root.
+    # Change back to root.
+    os.setegid(original_egid)
+    os.seteuid(original_euid)
+
+def _make_directories():
+  """Make the directories required for this process."""
+  # self.__work_dir = os.path.join(FLAGS.output_dir, ".work")
+  # Directories should be owned by nutanix user.
+  with run_as_nutanix_user():
+    # for directory in [FLAGS.output_dir, self.__work_dir]:
+    for directory in [FLAGS.output_dir]:
+      if not os.path.isdir(directory):
+        # Errors out if output_dir is a file or the parent directory
+        # does not exist.
+        print("Making directory %s" % directory)
+        os.mkdir(directory)
+
+def _get_release_version():
+  """Get the AOS release version of this CVM.
+  Examples:
+  el6-release-danube-4.6-stable-49d75b8321ebbfe6ab56a25a99a061b3ed172954
+  el6-release-euphrates-5.0-stable-8c575828b4598b2e70fc50f4d263be7a5e4efe57
+  el6-dbg-master-d53cda03e4f293c4188cf736e5f41ec681bebd88
+  """
+  with open("/etc/nutanix/release_version") as rel:
+    # return rel.readline().split("-", 2)[-1].rsplit("-", 1)[0]
+    return rel.readline().rstrip()
+
+def _do_subcommand(svm_ip, subcommand):
+  """Run the subcommand.
+
+  Arguments:
+  svm_ip: IP address of the CVM
+  subcommand: the subcommand to run
+  """
+  import cluster.service.service_utils
+
+  svm_ips = []
+  if FLAGS.cluster:
+    import util.net.ssh_client
+
+    # Get IP addresses of the CVMs in the cluster.
+    svm_ips = genesis_utils.get_svm_ips()
+    if not svm_ips:
+      print("Failed to get CVM IPs in the cluster", file=sys.stderr)
+      sys.exit(1)
+    svm_ips.remove(svm_ip)
+
+  def _start(svm_ip, svm_ips):
+    """Start myself as a daemon.
+
+    Arguments:
+    svm_ip: IP address of the CVM
+    svm_ips: list of IP address of the other CVMs in the cluster except
+             the CVM on which this process is running. This is empty
+             when running without the --cluster option.
+    """
+    ret_val = True
+
+    # Get all the gflags passed to the current process.
+    gflag_options = [arg for arg in sys.argv[1:] if arg.startswith("--")]
+    # Remove FLAGS.cluster since we do not want the the process on
+    # other nodes to run in cluster mode as well.
+    try:
+      gflag_options.remove("--cluster")
+    except ValueError:  # Option not passed
+      pass
+
+    # Check if it is already running.
+    pid = cluster.service.service_utils.get_pids(LOCK_FILE)
+    if pid:
+      print("%s: %s already running" % (svm_ip, pid))
+    else:
+      argv = [sys.argv[0]]
+      # Add the gflags to the self-monitoring process.
+      argv.extend(gflag_options)
+      # Start the self-monitoring process.
+      argv.append(SELF_MONITOR_CMDLINE_OPTION)
+
+      _make_directories()
+      if not os.geteuid():
+        with run_as_nutanix_user():
+          open(LOCK_FILE, "a").close()
+
+      # Hack: we are passing component_name as genesis as of now until
+      # it becomes a full fledged service running under the control of
+      # genesis.
+      cluster.service.service_utils.start_service(None, "genesis", None, argv,
+                                                  LOCK_FILE)
+      time.sleep(1)
+      pids = cluster.service.service_utils.get_pids(LOCK_FILE)
+      print("%s: %r" % (svm_ip, pids))
+
+    # When FLAGS.cluster is True.
+    for svmip in svm_ips:
+      ssh_client = util.net.ssh_client.SSHClient(svmip,
+                                                 FLAGS.svm_default_login)
+      cmd = "%s %s start" % (os.path.realpath(__file__),
+                             " ".join(gflag_options))
+      if not os.geteuid():  # root.
+        cmd = "sudo %s" % cmd
+      ret, out, err = ssh_client.execute(cmd)
+      if ret:
+        print("%s: failed to start. ret: %s, out: %s, err: %s"
+              % (svmip, ret, out, err.rstrip("\n")), file=sys.stderr)
+        ret_val = False
+      else:
+        print(out.rstrip("\n"))
+
+    return ret_val
+
+  def _status(svm_ip, svm_ips):
+    """Get the status of the daemon
+
+    Arguments:
+    svm_ip: IP address of the CVM
+    svm_ips: list of IP address of the other CVMs in the cluster except
+             the CVM on which this process is running. This is empty
+             when running without the --cluster option.
+    """
+    ret_val = True
+
+    print("%s: %r" % (svm_ip, cluster.service.service_utils.get_pids(
+        LOCK_FILE)))
+
+    # When FLAGS.cluster is True.
+    for svmip in svm_ips:
+      ssh_client = util.net.ssh_client.SSHClient(svmip,
+                                                 FLAGS.svm_default_login)
+      cmd = "%s status" % os.path.realpath(__file__)
+      if not os.geteuid():
+        cmd = "sudo %s" % cmd
+      ret, out, err = ssh_client.execute(cmd)
+      if ret:
+        print("%s: failed to get status. ret: %s, out: %s, err: %s"
+              % (svmip, ret, out, err.rstrip("\n")), file=sys.stderr)
+        ret_val = False
+      else:
+        print(out.rstrip("\n"))
+
+    return ret_val
+
+  def _stop(svm_ip, svm_ips, logging=True):
+    """Stop the daemon
+
+    Arguments:
+    svm_ip: IP address of the CVM
+    svm_ips: list of IP address of the other CVMs in the cluster except
+             the CVM on which this process is running. This is empty
+             when running without the --cluster option.
+    logging: log when True
+    """
+    ret_val = True
+
+    if logging:
+      FLAGS.logtostderr = True
+      log.initialize()
+    print("%s: stopping..." % svm_ip)
+    if not cluster.service.service_utils.stop_service(LOCK_FILE):
+      ret_val = False
+
+    print("Status:")
+    _status(svm_ip, [])
+
+    # When FLAGS.cluster is True.
+    for svmip in svm_ips:
+      ssh_client = util.net.ssh_client.SSHClient(svmip,
+                                                 FLAGS.svm_default_login)
+      cmd = "%s stop" % os.path.realpath(__file__)
+      if not os.geteuid():
+        cmd = "sudo %s" % cmd
+      ret, out, err = ssh_client.execute(cmd)
+      if ret:
+        print("%s: failed to stop. ret: %s, out: %s, err: %s"
+              % (svmip, ret, out, err.rstrip("\n")), file=sys.stderr)
+        ret_val = False
+      else:
+        print(out.rstrip("\n"))
+
+    return ret_val
+
+  def _restart(svm_ip, svm_ips):
+    """Restart the daemon.
+
+    Arguments:
+    svm_ip: IP address of the CVM
+    svm_ips: list of IP address of the other CVMs in the cluster except
+             the CVM on which this process is running. This is empty
+             when running without the --cluster option.
+    """
+    return _stop(svm_ip, svm_ips, False) and _start(svm_ip, svm_ips)
+
+  def _install(svm_ips):
+    """Copy myself to INSTALL_DIR.
+
+    Arguments:
+    svm_ips: list of IP address of the other CVMs in the cluster except
+             the CVM on which this process is running. This is empty
+             when running without the --cluster option.
+    """
+    FLAGS.logtostderr = True
+    log.initialize()
+
+    ret_val = True
+
+    import shutil
+
+    try:
+      shutil.copy(__file__, INSTALL_DIR)
+    except shutil.Error as exc:
+      if str(exc).endswith("are the same file"):
+        pass
+      else:
+        raise exc
+
+    # When FLAGS.cluster is True.
+    if svm_ips:
+      ret = genesis_utils.upload_bundle_svms(__file__,
+                                             os.path.join(INSTALL_DIR,
+                                                          FILE_NAME),
+                                             svm_ips, len(svm_ips))
+      if not ret:
+        print("Failed to install", file=sys.stderr)
+        ret_val = False
+
+    if ret_val:
+      print("Successfully installed")
+
+    return ret_val
+
+  def _uninstall(svm_ip, svm_ips):
+    """Remove myself from INSTALL_DIR
+
+    Arguments:
+    svm_ip: IP address of the CVM
+    svm_ips: list of IP address of the other CVMs in the cluster except
+             the CVM on which this process is running. This is empty
+             when running without the --cluster option.
+    """
+    ret_val = True
+
+    try:
+      os.remove(os.path.join(INSTALL_DIR, FILE_NAME))
+    except OSError as exc:
+      if exc.errno == 2:
+        pass
+      else:
+        raise exc
+    print("%s: uninstalled" % svm_ip)
+
+    # When FLAGS.cluster is True.
+    for svmip in svm_ips:
+      ssh_client = util.net.ssh_client.SSHClient(svmip,
+                                                 FLAGS.svm_default_login)
+      cmd = "%s uninstall" % os.path.realpath(__file__)
+      ret, out, err = ssh_client.execute(cmd)
+      if ret:
+        print("%s: failed to uninstall. ret: %s, out: %s, err: %s"
+              % (svmip, ret, out, err.rstrip("\n")), file=sys.stderr)
+        ret_val = False
+      else:
+        print("%s: uninstalled" % svmip)
+
+    return ret_val
+
+  def _version():
+    """Print the version of the program and exit."""
+    print(FILE_NAME, __version__)
+    sys.exit()
+
+  if subcommand == "start":
+    return _start(svm_ip, svm_ips)
+
+  elif subcommand == "status":
+    return _status(svm_ip, svm_ips)
+
+  elif subcommand == "stop":
+    return _stop(svm_ip, svm_ips)
+
+  elif subcommand == "restart":
+    return _restart(svm_ip, svm_ips)
+
+  elif subcommand == "install":
+    with run_as_nutanix_user():
+      return _install(svm_ips)
+
+  elif subcommand == "uninstall":
+    return _uninstall(svm_ip, svm_ips)
+
+  elif subcommand == "version":
+    return _version()
+
+  else:
+    _print_help()
+    sys.exit(1)
+
+def _print_help():
+  """Prints help as displayed by --helpshort gflag."""
+  print(__doc__)
+  print("flags:")
+  print(FLAGS.MainModuleHelp())
+
+def _tname(log_line):
+  """Prepend the thread name if this process is running more than one
+  thread.
+
+  Arguments:
+  log_line: log_line to which the thread name has to be prepended
+  """
+  if FLAGS.leadership:
+    return "%s %s" % (threading.current_thread().name, log_line)
+  else:
+    return log_line
+
+def _get_svm_ip():
+  """Get the IP address of the CVM. Exit in case of failures."""
+  svm_ip = genesis_utils.get_svm_ip()
+  if svm_ip is None:
+    print("Failed to get CVM IP", file=sys.stderr)
+    sys.exit(1)
+  return svm_ip
+
+def _stop_leadership_watch_threads():
+  """Stop the WatchLeaders threads."""
+  for thread in threading.enumerate():
+    if isinstance(thread, WatchLeaders):
+      thread.leadership_changed_event.set()
+
+def _set_signal_handler():
+  """Set the signal handlers to handle SIGTERMs sent by
+  cluster.service.service_utils.stop_service."""
+  import signal
+
+  stop_event = threading.Event()
+
+  def _signal_handler(signum, frame):
+    """Handler for SIGTERM. If leadership is enabled, stop the
+    WatchLeadership threads.
+
+    Arguments:
+    signum: signal number
+    frame : current stack frame (None or a frame object)
+    """
+    # RHS is a dictionary of signal numbers to signal
+    signal_ = dict((k, v) for v, k in signal.__dict__.iteritems() if
+                   v.startswith("SIG"))[signum]
+    log.INFO(_tname("Received signal num %s, signal: %s" % (signum, signal_)))
+    log.DEBUG(_tname("Stack frame: %s" % frame))
+    stop_event.set()
+
+    if FLAGS.leadership:
+      _stop_leadership_watch_threads()
+
+  # Install the signal handler for SIGTERM.
+  signal.signal(signal.SIGTERM, _signal_handler)
+
+  return stop_event
+
+def _parse_command_line_args(argv):
+  """Parse the command line options and argument using gflags.
+
+  Arguments:
+  argv: gflags, command-line options and argument
+  """
+  try:
+    # Parse the command-line options.
+    if HELP_CMDLINE_OPTION in argv:
+      _print_help()
+      sys.exit(0)
+
+    # Parse the other command-line options.
+    daemon = False
+    self_monitor = False
+    if DAEMON_CMDLINE_OPTION in argv:
+      daemon = True
+      argv.remove(DAEMON_CMDLINE_OPTION)
+    if SELF_MONITOR_CMDLINE_OPTION in argv:
+      self_monitor = True
+      argv.remove(SELF_MONITOR_CMDLINE_OPTION)
+
+    # Parse the gflags. Note that they are removed from argv.
+    argv = FLAGS(argv)
+
+  except gflags.FlagsError as exc:
+    print("%s\nUsage: %s ARGS\n%s" % (exc, sys.argv[0], FLAGS))
+    sys.exit(1)
+
+  return argv, daemon, self_monitor
+
+def main(argv):
+  """The main function has the following code paths:
+  i) self-monitor: resource_mon [flags] --rm_self_monitor
+  ii) daemon: resource_mon [flags] --daemon
+  iii) subcommand mode: resource_mon [flags] version | install |
+                                             start | status | stop |
+                                             restart | uninstall
+  iv) foreground process mode: resource_mon [flags]
+  """
+  argv, daemon, self_monitor = _parse_command_line_args(argv)
+
+  if self_monitor:
+    # i) Self-monitor process.
+    import cluster.service.service_utils
+    while self_monitor:
+      cmd = ("%s --daemon --logtostderr |& %s -o %s/%s.log" %
+             (" ".join(sys.argv), FLAGS.logpipe_path, NUTANIX_LOG_DIR,
+              FILE_NAME))
+      argv = ["/bin/bash", "-lc", cmd]
+      os.spawnvp(os.P_WAIT, argv[0], argv)
+      # Kill any subprocess of resource_monitor that may be lingering.
+      cluster.service.service_utils.stop_service(LOCK_FILE, exclude_self=True)
+
+  # The self monitoring process does not need to import the below.
+  # Especially important for me to have very little memory footprint
+  # considering I will mostly be used when system memory is really low.
+  # Hence trading off convention for being lean.
+  global genesis_utils
+  from cluster import genesis_utils as genesis_utils
+
+  log_file = os.path.join(NUTANIX_LOG_DIR, "%s.%s" % (FILE_NAME, "log"))
+
+  if daemon:
+    # ii) Daemon process.
+    FLAGS.logtostderr = True
+    log.initialize()
+
+    log.INFO(_tname("%s%s started with pid %d%s" % ("-" * 4, FILE_NAME,
+                                                    os.getpid(), "-" * 4)))
+    if not os.geteuid():
+      # Required when running as a daemon.
+      import grp
+      import pwd
+      nutanix_gid = grp.getgrnam(NUTANIX_USER).gr_gid
+      nutanix_uid = pwd.getpwnam(NUTANIX_USER).pw_uid
+      os.chown(log_file, nutanix_uid, nutanix_gid)
+      os.lchown(log_file, nutanix_uid, nutanix_gid)
+      log.INFO(_tname("Changed ownership of %s to %s" %
+                      (log_file, NUTANIX_USER)))
+
+    stop_event = _set_signal_handler()
+    resource_mon = ResourceMon(_get_svm_ip())
+    resource_mon.run_loop(stop_event)
+
+  else:
+    with run_as_nutanix_user():
+      open(log_file, "a").close()
+    try:
+      # iii) Sub-command mode.
+      if not _do_subcommand(_get_svm_ip(), argv[1]):
+        sys.exit(1)
+    except IndexError:
+      # iv) Foreground process mode
+      FLAGS.logtostderr = True
+      log.initialize()
+      log.INFO(_tname("%s%s started with pid %d%s" % ("-" * 4, FILE_NAME,
+                                                      os.getpid(), "-" * 4)))
+      resource_mon = ResourceMon(_get_svm_ip())
+      if not resource_mon.get_process_stats_count_times():
+        sys.exit(1)
+
+if __name__ == "__main__":
+  main(sys.argv)
