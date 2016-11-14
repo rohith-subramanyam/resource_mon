@@ -637,13 +637,13 @@ class WatchPyLeaders(WatchLeaders):
         try:
           zk_path_to_proc_name = self.__leadership_zk_path_to_proc_name[
               service]
+          for proc in zk_path_to_proc_name:
+            self.leader_services[proc] = True
         except KeyError:
           log.WARNING(_tname("Service %s in zknode %s not found in internal "
                              "metadata. Please raise a JIRA to add" %
                              (service, service_leadership_path)))
           self.leader_services[service] = True
-        for proc in zk_path_to_proc_name:
-          self.leader_services[proc] = True
 
     except IndexError:
       log.DEBUG(_tname("No zk children in %s" % service_leadership_path))
