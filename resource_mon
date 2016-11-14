@@ -86,6 +86,7 @@ NUTANIX_USER = "nutanix"
 DAEMON_CMDLINE_OPTION = "--daemon"
 SELF_MONITOR_CMDLINE_OPTION = "--rm_self_monitor"
 HELP_CMDLINE_OPTION = "-h"
+NICENESS = 19
 
 gflags.DEFINE_boolean(name="cluster",
                       default=False,
@@ -129,6 +130,10 @@ class ResourceMon(object):
   """Get process stats and write to output file(s)."""
   def __init__(self, svm_ip):
     self.__svm_ip = svm_ip
+
+    # Reduce the priority since I am only a monitoring process :(.
+    niceness = os.nice(NICENESS)
+    log.INFO("Set niceness to %d" % niceness)
 
   def __get_process_stats(self, output_file_name=None):
     """Get process stats once and write to the output file.
