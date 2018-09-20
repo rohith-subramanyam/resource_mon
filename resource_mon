@@ -2,10 +2,12 @@
 """usage: resource_mon [flags] [install | start | status | restart |
                              stop | uninstall | version]
 
+Gets the following system-level stats:
+total memory, available memory, free memory, cpu percent for each cpu.
 Gets the following process-level stats of all the running processes in
 the system/cluster that it has access to:
-ip, uid, pid, ppid, name, pss, uss, rss, vms, swap, num_fds, leader
-, timestamp
+ip, uid, pid, ppid, name, pss, uss, rss, vms, swap, num_fds,
+num_threads, cpu_pecent, leader, timestamp.
 ***** Run as sudo to gets stats of all processes including root and all
 other users. *****
 
@@ -20,6 +22,7 @@ Can run in 2 modes:
                        Usage: resource_mon [--cluster] [--count=M]
                                            [--interval=N]
                                            [--[no]leadership]
+                                           [--niceness=S]
                                            [--output_dir=/home/nutanix]
                        Writes stats to a new file 'output_dir/
                        resource_mon.IP_YYYYMMDD_HHMMSS.csv.out' for
@@ -27,10 +30,12 @@ Can run in 2 modes:
 
 2) Daemon: gets stats once every "interval" seconds until stopped.
            Usage: resource_mon [--cluster] [--interval=N]
-                               [--[no]leadership]
+                               [--[no]leadership] [--niceness=S]
                                [--output_dir=/home/nutanix]
-                               start | status | stop | restart
-           Appends stats to output_dir/resource_mon.csv.out
+                               start | restart
+                  Appends stats to output_dir/resource_mon.csv.out.
+
+                  resource_mon [--cluster] status | stop
 
 positional arguments:
   install    install the executable file to /home/nutanix/bin
@@ -86,7 +91,6 @@ NUTANIX_USER = "nutanix"
 DAEMON_CMDLINE_OPTION = "--daemon"
 SELF_MONITOR_CMDLINE_OPTION = "--rm_self_monitor"
 HELP_CMDLINE_OPTION = "-h"
-NICENESS = 19
 
 gflags.DEFINE_boolean(name="cluster",
                       default=False,
@@ -94,20 +98,20 @@ gflags.DEFINE_boolean(name="cluster",
                             "cluster."),
                       short_name="c")
 
-gflags.DEFINE_integer(name="interval",
-                      default=120,
-                      help=("time in seconds between which the process stats "
-                            "are collected. Note that this interval is not "
-                            "guaranteed if each iteration takes more than "
-                            "interval seconds."),
-                      short_name="i")
-
 gflags.DEFINE_integer(name="count",
                       default=1,
-                      help=("Number of times to collect process stats. Only "
-                            "applicable when running in foreground process "
-                            "mode."),
+                      help=("Number of times to collect system and process "
+                            "stats. Only applicable when running in foreground"
+                            " process mode."),
                       short_name="n")
+
+gflags.DEFINE_integer(name="interval",
+                      default=120,
+                      help=("time in seconds between which the system and "
+                            "process stats are collected. Note that this "
+                            "interval is not guaranteed if each iteration "
+                            "takes more than interval seconds."),
+                      short_name="i")
 
 gflags.DEFINE_boolean(name="leadership",
                       default=True,
@@ -115,6 +119,13 @@ gflags.DEFINE_boolean(name="leadership",
                             "if the nutanix process running on the node is a "
                             "leader or not."),
                       short_name="l")
+
+gflags.DEFINE_integer(name="niceness",
+                      default=10,
+                      help=("Set niceness which affects process scheduling. "
+                            "It ranges from -20 (most favorable scheduling) to"
+                            " 19 (least favorable)."),
+                      short_name="s")
 
 gflags.DEFINE_string(name="output_dir",
                      default=NUTANIX_LOG_DIR,
@@ -127,16 +138,19 @@ gflags.ADOPT_module_key_flags(log)
 FLAGS = gflags.FLAGS
 
 class ResourceMon(object):
-  """Get process stats and write to output file(s)."""
+  """Get system and process stats and write to output file(s)."""
   def __init__(self, svm_ip):
     self.__svm_ip = svm_ip
 
-    # Reduce the priority since I am only a monitoring process :(.
-    niceness = os.nice(NICENESS)
+    # By default, unless not overridden, reduce the priority since I am
+    # only a monitoring process :(.
+    niceness = os.nice(FLAGS.niceness)
     log.INFO("Set niceness to %d" % niceness)
 
-  def __get_process_stats(self, output_file_name=None):
-    """Get process stats once and write to the output file.
+    self.__cpu_percent_called = False
+
+  def __get_stats(self, output_file_name=None):
+    """Get system and process stats once and write to the output file.
 
     Arguments:
     output_file_name: append to output_dir/resource_mon.csv.out if
@@ -145,13 +159,31 @@ class ResourceMon(object):
     import csv
     import psutil
 
-    log.INFO(_tname("Getting process stats"))
+    log.INFO(_tname("Getting system and process stats"))
 
     ad_pids = []
     procs = []
     epoch = int(time.time())
     date_time = time.strftime("%Y%m%d_%H%M%S")
     sys_mem = psutil.virtual_memory()
+
+    # https://psutil.readthedocs.io/en/latest/#psutil.cpu_percent.
+    # When interval is > 0.0 compares system CPU times elapsed before and after
+    # the interval (blocking). When interval is 0.0 or None compares system CPU
+    # times elapsed since last call or module import, returning immediately.
+    # That means the first time this is called it will return a meaningless 0.0
+    # value which you are supposed to ignore. In this case it is recommended
+    # for accuracy that this function be called with at least 0.1 seconds
+    # between calls.
+    # Warning the first time this function is called with interval = 0.0 or
+    # None it will return a meaningless 0.0 value which you are supposed to
+    # ignore.
+    if not self.__cpu_percent_called:
+      _ = psutil.cpu_percent(interval=0.1, percpu=True)
+      self.__cpu_percent_called = True
+
+    sys_cpu = psutil.cpu_percent(percpu=True)
+
     for proc in psutil.process_iter():
       try:
         username = proc.username()
@@ -176,6 +208,7 @@ class ResourceMon(object):
         num_fds = proc.num_fds()
         # ios = proc.io_counters()
         num_threads = proc.num_threads()
+        cpu_percent = proc.cpu_percent(interval=0.1)
 
         # Leadership.
         if FLAGS.leadership:
@@ -223,6 +256,7 @@ class ResourceMon(object):
         proc._num_fds = num_fds
         # proc._ios = ios
         proc._num_threads = num_threads
+        proc._cpu_percent = cpu_percent
         if FLAGS.leadership:
           proc._leader = str(leader).upper()
         proc._timestamp = int(time.time())
@@ -250,6 +284,9 @@ class ResourceMon(object):
               file=out)
         print("# free (kB): %s,%s" % (epoch, (sys_mem.free / 1000)), file=out)
 
+        print("# System CPU percent: %s" % ', '.join(map(str, sys_cpu)),
+              file=out)
+
         # lineterminator="\n" avoids the additional carriage return
         # being inserted even when opened in binary mode.
         csv_writer = csv.writer(out, lineterminator="\n")
@@ -257,7 +294,7 @@ class ResourceMon(object):
         # Header.
         header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", "uss(kB)",
                   "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "num_threads",
-                  "timestamp"]
+                  "cpu_percent", "timestamp"]
         if FLAGS.leadership:
           # Insert in the 2nd last position before timestamp.
           header.insert(-1, "leader")
@@ -268,7 +305,8 @@ class ResourceMon(object):
         for proc in procs:
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
                  proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
-                 proc._swap, proc._num_fds, proc._num_threads, proc._timestamp]
+                 proc._swap, proc._num_fds, proc._num_threads,
+                 proc._cpu_percent, proc._timestamp]
           if FLAGS.leadership:
             # Insert in the 2nd last position before timestamp.
             row.insert(-1, proc._leader)
@@ -288,10 +326,10 @@ class ResourceMon(object):
     """Return the leader ports from all the leadership watchers."""
     if not FLAGS.leadership:
       return []
-    else:
-      return (self.__watch_leaders.get_leader_ports() +
-              self.__watch_py_leaders.get_leader_ports() +
-              self.__watch_go_leaders.get_leader_ports())
+
+    return (self.__watch_leaders.get_leader_ports() +
+            self.__watch_py_leaders.get_leader_ports() +
+            self.__watch_go_leaders.get_leader_ports())
 
   def __setup(self, stop_event=None):
     """Run all the setup steps required.
@@ -314,12 +352,12 @@ class ResourceMon(object):
       self.__watch_leaders.start()
       self.__watch_py_leaders.start()
       self.__watch_go_leaders.start()
-      # Main thread continues to collect the process stats.
+      # Main thread continues to collect system and process stats.
 
   def get_process_stats_count_times(self):
-    """Wrapper around self.__get_process_stats which calls it
-    FLAGS.count times every FLAGS.interval seconds used when running in
-    foreground process mode."""
+    """Wrapper around self.__get_stats which calls it FLAGS.count times
+    every FLAGS.interval seconds used when running in foreground
+    process mode."""
     ret_val = True
 
     # TODO: This is serial, use CommandExecutor to run them in parallel.
@@ -370,7 +408,7 @@ class ResourceMon(object):
         time_now = time.time()
         if time_now - last_start_time > FLAGS.interval:
           last_start_time = time_now
-          self.__get_process_stats()
+          self.__get_stats()
           try:
             # Remaining no. of loops. Don't sleep in the last iteration.
             if FLAGS.count - (count + 1):
@@ -385,7 +423,7 @@ class ResourceMon(object):
     return ret_val
 
   def run_loop(self, stop_event):
-    """Wrapper around self.__get_process_stats which calls it every
+    """Wrapper around self.__get_stats which calls it every
     FLAGS.interval seconds until stopped used when running in daemon
     mode.
 
@@ -403,7 +441,7 @@ class ResourceMon(object):
       time_now = time.time()
       if time_now - last_start_time > FLAGS.interval:
         last_start_time = time_now
-        self.__get_process_stats("resource_mon.csv.out")
+        self.__get_stats("resource_mon.csv.out")
         # Check for stop event just before you go to sleep in order to
         # be more responsive to stop command.
         if stop_event.is_set():
@@ -1160,8 +1198,8 @@ def _tname(log_line):
   """
   if FLAGS.leadership:
     return "%s %s" % (threading.current_thread().name, log_line)
-  else:
-    return log_line
+
+  return log_line
 
 def _get_svm_ip():
   """Get the IP address of the CVM. Exit in case of failures."""
