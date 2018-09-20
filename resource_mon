@@ -175,6 +175,7 @@ class ResourceMon(object):
 
         num_fds = proc.num_fds()
         # ios = proc.io_counters()
+        num_threads = proc.num_threads()
 
         # Leadership.
         if FLAGS.leadership:
@@ -221,6 +222,7 @@ class ResourceMon(object):
         proc._swap = swap
         proc._num_fds = num_fds
         # proc._ios = ios
+        proc._num_threads = num_threads
         if FLAGS.leadership:
           proc._leader = str(leader).upper()
         proc._timestamp = int(time.time())
@@ -254,20 +256,28 @@ class ResourceMon(object):
 
         # Header.
         header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", "uss(kB)",
-                  "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "timestamp"]
+                  "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "num_threads",
+                  "timestamp"]
         if FLAGS.leadership:
           # Insert in the 2nd last position before timestamp.
           header.insert(-1, "leader")
         csv_writer.writerow(header)
 
+        num_threads_sys = 0
+        num_fds_sys = 0
         for proc in procs:
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
                  proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
-                 proc._swap, proc._num_fds, proc._timestamp]
+                 proc._swap, proc._num_fds, proc._num_threads, proc._timestamp]
           if FLAGS.leadership:
             # Insert in the 2nd last position before timestamp.
             row.insert(-1, proc._leader)
           csv_writer.writerow(row)
+          num_threads_sys += proc._num_threads
+          num_fds_sys += proc._num_fds
+        print("# Total no. of threads in the system: %s" % num_threads_sys,
+              file=out)
+        print("# Total no. of FDs in the system: %s" % num_fds_sys, file=out)
 
     if output_file_name is None:
       log.INFO(_tname("Wrote %s" % output_file))
