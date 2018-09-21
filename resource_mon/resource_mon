@@ -320,7 +320,7 @@ class ResourceMon(object):
           # The process is a container process owned by an user that
           # does not exist on the host.
           # Get real user ID instead.
-          username = "ctr_%s" % proc.uid()[0]
+          username = "ctr_%s" % proc.uids()[0]
         ppid = proc.ppid()
         try:
           name = _get_cmd_name(proc.name(), proc.cmdline(), ppid)
