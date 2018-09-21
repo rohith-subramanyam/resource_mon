@@ -299,16 +299,15 @@ class ResourceMon(object):
     # When interval is > 0.0 compares system CPU times elapsed before and after
     # the interval (blocking). When interval is 0.0 or None compares system CPU
     # times elapsed since last call or module import, returning immediately.
-    # That means the first time this is called it will return a meaningless 0.0
-    # value which you are supposed to ignore. In this case it is recommended
-    # for accuracy that this function be called with at least 0.1 seconds
-    # between calls.
-    # Warning the first time this function is called with interval = 0.0 or
-    # None it will return a meaningless 0.0 value which you are supposed to
-    # ignore.
     if not self.__cpu_percent_called:
-      _ = psutil.cpu_percent(interval=0.1, percpu=True)
+      # Warning: the first time this function is called with interval =
+      # 0.0 or None it will return a meaningless 0.0 value which you are
+      # supposed to ignore.
+      _ = psutil.cpu_percent(percpu=True)
       self.__cpu_percent_called = True
+      # In this case it is recommended for accuracy that this function
+      # be called with at least 0.1 seconds between calls.
+      time.sleep(1)
 
     sys_cpu = psutil.cpu_percent(percpu=True)
 
