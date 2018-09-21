@@ -314,7 +314,13 @@ class ResourceMon(object):
 
     for proc in psutil.process_iter():
       try:
-        username = proc.username()
+        try:
+          username = proc.username()
+        except KeyError:
+          # The process is a container process owned by an user that
+          # does not exist on the host.
+          # Get real user ID instead.
+          username = "ctr_%s" % proc.uid()[0]
         ppid = proc.ppid()
         try:
           name = _get_cmd_name(proc.name(), proc.cmdline(), ppid)
@@ -621,7 +627,7 @@ class WatchLeaders(threading.Thread):
     # Mapping of leader processes to True.
     self.leader_services = {}
     # List of ports used by processes on this node that are leaders.
-    self.__leader_ports = []
+    self.leader_ports = []
 
     # Event used to watch for changes in leadership_root zk node.
     self.leadership_changed_event = threading.Event()
@@ -629,7 +635,7 @@ class WatchLeaders(threading.Thread):
   def get_leader(self, zk_session, service_leadership_path, service):
     """Check service_leadership_path zk node and find if this node is
     the leader. If yes, update self.leader_services or
-    self.__leader_ports.
+    self.leader_ports.
 
     Arguments:
     zk_session: instance of zeus.zookeeper_session.ZookeeperSession()
@@ -681,7 +687,7 @@ class WatchLeaders(threading.Thread):
                                  "add" % (service, service_leadership_path)))
               self.leader_services[service] = True
               if port is not None:
-                self.__leader_ports.append(port)
+                self.leader_ports.append(port)
           break
       except Exception:
         import traceback
@@ -727,7 +733,7 @@ class WatchLeaders(threading.Thread):
 
   def get_leader_ports(self):
     """Return the leader ports."""
-    return self.__leader_ports
+    return self.leader_ports
 
 class WatchPyLeaders(WatchLeaders):
   """Watch the leadership zk nodes and get leaders for python services.
@@ -849,7 +855,7 @@ class WatchGoLeaders(WatchLeaders):
   def get_leader(self, zk_session, service_leadership_path, service):
     """Check service_leadership_path zk node and find if this node is
     the leader. If yes, update self.leader_services or
-    self.__leader_ports.
+    self.leader_ports.
 
     Arguments:
     zk_session: instance of zeus.zookeeper_session.ZookeeperSession()
@@ -882,7 +888,7 @@ class WatchGoLeaders(WatchLeaders):
                              (service, service_leadership_path)))
           self.leader_services[service] = True
           if port is not None:
-            self.__leader_ports.append(port)
+            self.leader_ports.append(port)
     except IndexError:
       log.DEBUG(_tname("No zk children in %s" % service_leadership_path))
     # Do not want an error while parsing one zknode to stop the thread.
