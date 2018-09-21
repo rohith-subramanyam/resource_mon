@@ -150,7 +150,7 @@ Analysis
 ELK (ElasticSearch Logstash Kibana) stack can be used to visualize
 `resource_mon` output. The output CSV files can be transformed using
 this logstash config:
-https://drt-it-github-prod-1.eng.nutanix.com/rohith-subramanyam/experimental/raw/master/resource_mon/resource_mon,
+https://drt-it-github-prod-1.eng.nutanix.com/rohith-subramanyam/experimental/raw/master/resource_mon/logstash.conf,
 indexed in Elastic Search and visualized in Kibana.
 
 -----------------------------------------------------------------------
