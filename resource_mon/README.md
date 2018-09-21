@@ -85,6 +85,11 @@ The output files are rotated by scavenger by default without needing any change 
 ### Analysis
 ELK (ElasticSearch Logstash Kibana) stack can be used to visualize `resource_mon` output. The output CSV files can be transformed using [this logstash config](logstash.conf), indexed in Elastic Search and visualized in Kibana.
 
+## Uninstall
+Removes the installed file.
+```shell
+resource_mon [--cluster] uninstall
+```
 
 ## Usage
 ```shell
@@ -143,10 +148,4 @@ gflags:
   --undefok: comma-separated list of flag names that it is okay to specify on the command line even if the program does not define a flag with that name. IMPORTANT: flags in
     this list that have arguments MUST use the --flag=value format.
     (default: '')
-```
-
-## Uninstall
-Removes the installed file.
-```shell
-resource_mon [--cluster] uninstall
 ```
