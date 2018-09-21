@@ -303,6 +303,7 @@ class ResourceMon(object):
       # Warning: the first time this function is called with interval =
       # 0.0 or None it will return a meaningless 0.0 value which you are
       # supposed to ignore.
+      log.DEBUG("Getting CPU percent for the first time")
       _ = psutil.cpu_percent(percpu=True)
       self.__cpu_percent_called = True
       # In this case it is recommended for accuracy that this function
