@@ -38,16 +38,16 @@ the system/cl that it has access to:
 1. **ip:** IP a dress of thenode in which the process is run
 2. **uid:** name of the user that owns the process
 3. **pid:** process ID of the process
-5. **name:** name of the process (decipher nutanix service name from its command-line.
+5. **name:** name of the process (deciphers nutanix service name from its command-line.
 6. **pss:** aka `Proportional Set Size`, is the amount of memory shared with other processes, accounted in a way that the amount is divided evenly between the processes that share it. I.e., if a process has 10 MBs all to itself and 10 MBs shared with another process its PSS will be 15 MBs.
 7. **uss:** aka `Unique Set Size`, this is the memory which is unique to a process and which would be freed if the process was terminated right now.
 8. **rss:** aka `Resident Set Size`, this is the non-swapped physical memory a process has used. It matches top's RES column.
 9. **vms:** aka `Virtual Memory Size`, this is the total amount of virtual memory used by the process. It matches top's VIRT column.
 10. **swap:** amount of memory that has been swapped out to disk.
-11. **num_fds:** The number of file descriptors currently opened by this process (non cumulative).
-12. **num_threads:** The number of threads currently used by this process (non cumulative).
+11. **num_fds:** number of file descriptors currently opened by this process (non cumulative).
+12. **num_threads:** number of threads currently used by this process (non cumulative).
 13. **cpu_pecent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs.
-14. **leader:** if the process is a Nutanix service, this is True if the process is the service leader.
+14. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader.
 15. **timestamp:** the epoch at which the above stats were collected.
 
 ## Install
