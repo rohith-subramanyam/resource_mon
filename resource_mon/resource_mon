@@ -154,6 +154,12 @@ https://drt-it-github-prod-1.eng.nutanix.com/rohith-subramanyam/experimental/raw
 indexed in Elastic Search and visualized in Kibana.
 
 -----------------------------------------------------------------------
+Uninstall
+-----------------------------------------------------------------------
+Removes the installed file.
+$ resource_mon [--cluster] uninstall
+
+-----------------------------------------------------------------------
 Usage
 -----------------------------------------------------------------------
 $ resource_mon [flags] [install | start | status | restart | stop |
@@ -168,12 +174,6 @@ restart:   restart the daemom
 stop:      stop the daemon
 uninstall: remove the file from /home/nutanix/bin
 version:   print version of the program and exit
-
------------------------------------------------------------------------
-Uninstall
------------------------------------------------------------------------
-Removes the installed file.
-$ resource_mon [--cluster] uninstall
 """
 #
 # Copyright (c) 2016 Nutanix Inc. All rights reserved.
