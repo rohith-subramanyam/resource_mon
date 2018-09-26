@@ -31,6 +31,8 @@ Gets the following system-level stats:
 2. **available memory:** the memory that can be given instantly to processes without the system going into swap.
 3. **free memory:** memory not being used at all (zeroed) that is readily available.
 4. **cpu percent:** current system-wide CPU utilization as a percentage for each CPU.
+5. num_fds: total number of file descriptors currently opened by all the processes in the system that I have access to.
+6. num_threads: total number of threads currently used by all the processes in system that I have access to.
 
 ### Process
 Gets the following process-level stats of all the running processes in

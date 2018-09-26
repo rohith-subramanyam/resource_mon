@@ -53,6 +53,10 @@ Gets the following system-level stats:
                 available.
 4. cpu percent: current system-wide CPU utilization as a percentage for
                 each CPU.
+5. num_fds: total number of file descriptors currently opened by all
+            the processes in the system that I have access to.
+6. num_threads: total number of threads currently used by all the
+                processes in system that I have access to.
 
 -------
 Process
