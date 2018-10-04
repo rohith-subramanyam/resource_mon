@@ -46,17 +46,17 @@ resources on a Nutanix CVM at a system and process level.
 System
 ------
 Gets the following system-level stats:
-1. total memory: total physical memory.
+1. total memory: total physical memory
 2. available memory: the memory that can be given instantly to
-                     processes without the system going into swap.
+                     processes without the system going into swap
 3. free memory: memory not being used at all (zeroed) that is readily
-                available.
+                available
 4. cpu percent: current system-wide CPU utilization as a percentage for
-                each CPU.
+                each CPU
 5. num_fds: total number of file descriptors currently opened by all
-            the processes in the system that I have access to.
+            the processes in the system that I have access to
 6. num_threads: total number of threads currently used by all the
-                processes in system that I have access to.
+                processes in system that I have access to
 
 -------
 Process
@@ -76,22 +76,22 @@ the system/cluster that it has access to:
         its PSS will be 15 MBs.
 7. uss: aka "Unique Set Size", this is the memory which is unique to a
         process and which would be freed if the process was terminated
-        right now.
+        right now
 8. rss: aka "Resident Set Size", this is the non-swapped physical
-        memory a process has used. It matches top's RES column.
+        memory a process has used. It matches top's RES column
 9. vms: aka "Virtual Memory Size", this is the total amount of virtual
-        memory used by the process. It matches top's VIRT column.
-10. swap: amount of memory that has been swapped out to disk.
+        memory used by the process. It matches top's VIRT column
+10. swap: amount of memory that has been swapped out to disk
 11. num_fds: number of file descriptors currently opened by this
-             process (non cumulative).
+             process (non cumulative)
 12. num_threads: number of threads currently used by this process
-                 (non cumulative).
+                 (non cumulative)
 13. cpu_pecent: process CPU utilization as a percentage which can also
                 be > 100.0 in case of a process running multiple
-                threads on different CPUs.
+                threads on different CPUs
 14. leader: this is set to TRUE if the process is a Nutanix service and
-            the service leader.
-15. timestamp: the epoch at which the above stats were collected.
+            the service leader
+15. timestamp: the epoch at which the above stats were collected
 
 -----------------------------------------------------------------------
 Install
