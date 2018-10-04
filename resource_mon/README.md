@@ -27,30 +27,31 @@ Resource Monitor is a tool to monitor the memory, CPU and other resources on a N
 
 ### System
 Gets the following system-level stats:
-1. **total memory:** total physical memory.
-2. **available memory:** the memory that can be given instantly to processes without the system going into swap.
-3. **free memory:** memory not being used at all (zeroed) that is readily available.
-4. **cpu percent:** current system-wide CPU utilization as a percentage for each CPU.
-5. num_fds: total number of file descriptors currently opened by all the processes in the system that I have access to.
-6. num_threads: total number of threads currently used by all the processes in system that I have access to.
+1. **total memory:** total physical memory
+2. **available memory:** the memory that can be given instantly to processes without the system going into swap
+3. **free memory:** memory not being used at all (zeroed) that is readily available
+4. **cpu percent:** current system-wide CPU utilization as a percentage for each CPU
+5. **num_fds:** total number of file descriptors currently opened by all the processes in the system that I have access to
+6. **num_threads:** total number of threads currently used by all the processes in system that I have access to
 
 ### Process
 Gets the following process-level stats of all the running processes in
 the system/cl that it has access to:
-1. **ip:** IP a dress of thenode in which the process is run
+1. **ip:** IP address of the node in which the process is run
 2. **uid:** name of the user that owns the process
 3. **pid:** process ID of the process
-5. **name:** name of the process (deciphers nutanix service name from its command-line.
+4. **ppid:** process ID of the parent process
+5. **name:** name of the process (deciphers nutanix service name from its command-line)
 6. **pss:** aka `Proportional Set Size`, is the amount of memory shared with other processes, accounted in a way that the amount is divided evenly between the processes that share it. I.e., if a process has 10 MBs all to itself and 10 MBs shared with another process its PSS will be 15 MBs.
-7. **uss:** aka `Unique Set Size`, this is the memory which is unique to a process and which would be freed if the process was terminated right now.
+7. **uss:** aka `Unique Set Size`, this is the memory which is unique to a process and which would be freed if the process was terminated right now
 8. **rss:** aka `Resident Set Size`, this is the non-swapped physical memory a process has used. It matches top's RES column.
 9. **vms:** aka `Virtual Memory Size`, this is the total amount of virtual memory used by the process. It matches top's VIRT column.
-10. **swap:** amount of memory that has been swapped out to disk.
-11. **num_fds:** number of file descriptors currently opened by this process (non cumulative).
-12. **num_threads:** number of threads currently used by this process (non cumulative).
-13. **cpu_pecent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs.
-14. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader.
-15. **timestamp:** the epoch at which the above stats were collected.
+10. **swap:** amount of memory that has been swapped out to disk
+11. **num_fds:** number of file descriptors currently opened by this process (non cumulative)
+12. **num_threads:** number of threads currently used by this process (non cumulative)
+13. **cpu_pecent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs
+14. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader
+15. **timestamp:** the epoch at which the above stats were collected
 
 ## Install
 Like everything at Nutanix, it is simple and 1-click.
