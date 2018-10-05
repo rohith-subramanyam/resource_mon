@@ -195,20 +195,18 @@ assert __name__ == "__main__", "This module should NOT be imported."
 
 __version__ = 0.1
 
-import sys
-sys.path.append("/home/nutanix/bin")
-
-import env  # Add nutanix libraries to sys.path.
-
+import contextlib
 import os
+import sys
 import threading
 import time
 
-from contextlib import contextmanager
+sys.path.append("/home/nutanix/bin")  # install is run from ~nutanix directory.
+import env  # Add nutanix libraries to sys.path.
 
 import gflags
 
-from util.base import log
+import util.base.log as log
 
 genesis_utils = None
 
@@ -926,7 +924,7 @@ def _get_cmd_name(name, cmdline, ppid):
       # /home/nutanix/data/logs/genesis.out'].
       cmd = cmdline[-1].split()
       name = os.path.basename(cmd[0])
-      if name == "python":
+      if name.startswith("python"):
         # name can still be python in the case of:
         # ['/bin/bash', '-lc',
         # 'python /home/nutanix/ncc/bin/health_server.py
@@ -968,7 +966,7 @@ def _get_cmd_name(name, cmdline, ppid):
     # '--logtostderr=True'].
     name = "service_monitor_%s" % os.path.basename(cmdline[1])
 
-  elif name == "python":
+  elif name.startswith("python"):
     # Get the name of the python main program.
     # Ex.:- Get 'genesis' from ['python', '-O',
     # '/usr/local/nutanix/cluster/bin/genesis', '--foreground=true'].
@@ -1006,7 +1004,7 @@ def _get_cmd_name(name, cmdline, ppid):
 
   return name
 
-@contextmanager
+@contextlib.contextmanager
 def run_as_nutanix_user():
   """Run the body of the context manager as nutanix user when this
   process is running as root."""
