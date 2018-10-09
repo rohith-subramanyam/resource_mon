@@ -49,8 +49,8 @@ the system/cl that it has access to:
 10. **swap:** amount of memory that has been swapped out to disk
 11. **num_fds:** number of file descriptors currently opened by this process (non cumulative)
 12. **num_threads:** number of threads currently used by this process (non cumulative)
-13. **cpu_pecent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs
-14. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader
+13. **cpu_percent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs. Can be disabled with --noprocess_cpu option as it adds a delay of 0.1 seconds per process.
+14. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader. Can be disabled with --noleadership option.
 15. **timestamp:** the epoch at which the above stats were collected
 
 ## Install
@@ -119,8 +119,7 @@ resource_mon:
   -?,--[no]help: show this help
   --[no]helpshort: show usage only for this module
   --[no]helpxml: like --help, but generates XML output
-  -i,--interval: time in seconds between which the system and process stats are collected. Note that this interval is not guaranteed if each iteration takes more than
-    interval seconds.
+  -i,--interval: time in seconds between which the system and process stats are collected. Note that this interval is not guaranteed if each iteration takes more than interval seconds.
     (default: '120')
     (an integer)
   -l,--[no]leadership: Adds a boolean column 'leadership' which checks if the nutanix process running on the node is a leader or not.
@@ -130,6 +129,8 @@ resource_mon:
     (an integer)
   -o,--output_dir: Path to the directory where the output files are written
     (default: '/home/nutanix/data/logs')
+  -u,--[no]process_cpu: Adds a float column 'cpu_percent' which is the process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs. Adds a delay of 0.1 seconds per process.
+    (default: 'true')
 
 util.base.log:
   --[no]debug: If True, enable DEBUG log messages.
@@ -148,7 +149,6 @@ util.base.log:
 gflags:
   --flagfile: Insert flag definitions from the given file into the command line.
     (default: '')
-  --undefok: comma-separated list of flag names that it is okay to specify on the command line even if the program does not define a flag with that name. IMPORTANT: flags in
-    this list that have arguments MUST use the --flag=value format.
+  --undefok: comma-separated list of flag names that it is okay to specify on the command line even if the program does not define a flag with that name. IMPORTANT: flags in this list that have arguments MUST use the --flag=value format.
     (default: '')
 ```
