@@ -86,11 +86,14 @@ the system/cluster that it has access to:
              process (non cumulative)
 12. num_threads: number of threads currently used by this process
                  (non cumulative)
-13. cpu_pecent: process CPU utilization as a percentage which can also
+13. cpu_percent: process CPU utilization as a percentage which can also
                 be > 100.0 in case of a process running multiple
-                threads on different CPUs
+                threads on different CPUs. Can be disabled with
+                --noprocess_cpu option as it adds a delay of 0.1 seconds
+                per process.
 14. leader: this is set to TRUE if the process is a Nutanix service and
-            the service leader
+            the service leader. Can be disabled with --noleadership
+            option.
 15. timestamp: the epoch at which the above stats were collected
 
 -----------------------------------------------------------------------
@@ -1495,6 +1498,7 @@ def _log_gflag_values(foreground=False):
   log.DEBUG(_tname("leadership: %s" % FLAGS.leadership))
   log.DEBUG(_tname("niceness: %s" % FLAGS.niceness))
   log.DEBUG(_tname("output_dir: %s" % FLAGS.output_dir))
+  log.DEBUG(_tname("process_cpu: %s" % FLAGS.process_cpu))
 
 def _parse_command_line_args(argv):
   """Parse the command line options and argument using gflags.
