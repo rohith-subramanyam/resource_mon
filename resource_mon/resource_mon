@@ -1476,7 +1476,7 @@ def _log_gflag_values(foreground=False):
   log.DEBUG(_tname("interval: %s" % FLAGS.interval))
   log.DEBUG(_tname("leadership: %s" % FLAGS.leadership))
   log.DEBUG(_tname("niceness: %s" % FLAGS.niceness))
-  log.DEBUG(_tname("output_dir: %s" % FLAGS.outpur_dir))
+  log.DEBUG(_tname("output_dir: %s" % FLAGS.output_dir))
 
 def _parse_command_line_args(argv):
   """Parse the command line options and argument using gflags.
