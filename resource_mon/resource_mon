@@ -263,6 +263,15 @@ gflags.DEFINE_string(name="output_dir",
                            "written"),
                      short_name="o")
 
+gflags.DEFINE_boolean(name="process_cpu",
+                      default=True,
+                      help=("Adds a float column 'cpu_percent' which is the "
+                            "process CPU utilization as a percentage which can"
+                            " also be > 100.0 in case of a process running "
+                            "multiple threads on different CPUs. Adds a delay "
+                            "of 0.1 seconds per process."),
+                      short_name="u")
+
 gflags.ADOPT_module_key_flags(log)
 
 FLAGS = gflags.FLAGS
@@ -343,7 +352,8 @@ class ResourceMon(object):
         num_fds = proc.num_fds()
         # ios = proc.io_counters()
         num_threads = proc.num_threads()
-        cpu_percent = proc.cpu_percent(interval=0.1)
+        if FLAGS.process_cpu:
+          cpu_percent = proc.cpu_percent(interval=0.1)
 
         # Leadership.
         if FLAGS.leadership:
@@ -391,7 +401,8 @@ class ResourceMon(object):
         proc._num_fds = num_fds  # pylint: disable=protected-access
         # proc._ios = ios
         proc._num_threads = num_threads  # pylint: disable=protected-access
-        proc._cpu_percent = cpu_percent  # pylint: disable=protected-access
+        if FLAGS.process_cpu:
+          proc._cpu_percent = cpu_percent  # pylint: disable=protected-access
         if FLAGS.leadership:
           # pylint: disable=protected-access
           proc._leader = str(leader).upper()
@@ -446,9 +457,13 @@ class ResourceMon(object):
         # Header.
         header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", "uss(kB)",
                   "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "num_threads",
-                  "cpu_percent", "timestamp"]
-        if FLAGS.leadership:
+                  "timestamp"]
+        if FLAGS.process_cpu:
           # Insert in the 2nd last position before timestamp.
+          header.insert(-1, "cpu_percent")
+        if FLAGS.leadership:
+          # Insert in the 2nd last position before timestamp and
+          # cpu_percent if it is enabled.
           header.insert(-1, "leader")
         csv_writer.writerow(header)
 
