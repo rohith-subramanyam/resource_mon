@@ -477,10 +477,13 @@ class ResourceMon(object):
         for proc in procs:
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
                  proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
-                 proc._swap, proc._num_fds, proc._num_threads,
-                 proc._cpu_percent, proc._timestamp]
-          if FLAGS.leadership:
+                 proc._swap, proc._num_fds, proc._num_threads, proc._timestamp]
+          if FLAGS.process_cpu:
             # Insert in the 2nd last position before timestamp.
+            row.insert(-1, proc._cpu_percent)
+          if FLAGS.leadership:
+            # Insert in the 2nd last position before timestamp and
+            # cpu_percent if it is enabled.
             row.insert(-1, proc._leader)
           csv_writer.writerow(row)
           num_threads_sys += proc._num_threads
