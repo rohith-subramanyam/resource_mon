@@ -193,7 +193,7 @@ from __future__ import print_function
 
 assert __name__ == "__main__", "This module should NOT be imported."
 
-__version__ = 0.1
+__version__ = 1.0
 
 import contextlib
 import os
@@ -288,7 +288,8 @@ class ResourceMon(object):
     """
     import psutil
 
-    log.INFO(_tname("Getting system and process stats"))
+    log.INFO(_tname("Getting system and process stats every %d seconds" %
+                    FLAGS.interval))
 
     ad_pids = []
     procs = []
@@ -453,9 +454,12 @@ class ResourceMon(object):
 
         num_threads_sys = 0
         num_fds_sys = 0
+
         # Sort in descending order of pss.
         # pylint: disable=protected-access
-        for proc in procs.sort(key=lambda proc: proc._pss, reverse=True):
+        procs.sort(key=lambda proc: proc._pss, reverse=True)
+
+        for proc in procs:
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
                  proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
                  proc._swap, proc._num_fds, proc._num_threads,
@@ -476,7 +480,11 @@ class ResourceMon(object):
       log.INFO(_tname("Appended to %s" % output_file))
 
   def __get_leader_ports(self):
-    """Return the leader ports from all the leadership watchers."""
+    """Return the leader ports from all the leadership watchers.
+
+    Returns:
+    a list of leader ports
+    """
     if not FLAGS.leadership:
       return []
 
@@ -514,7 +522,11 @@ class ResourceMon(object):
   def get_process_stats_count_times(self):
     """Wrapper around self.__get_stats which calls it FLAGS.count times
     every FLAGS.interval seconds used when running in foreground
-    process mode."""
+    process mode.
+
+    Returns:
+    True on success. False on failure.
+    """
     ret_val = True
 
     # TODO: This is serial, use CommandExecutor to run them in parallel.
@@ -752,11 +764,19 @@ class WatchLeaders(threading.Thread):
         self.leadership_changed_event.wait()
 
   def get_leaders(self):
-    """Return the leader services."""
+    """Return the leader services.
+
+    Returns:
+    a map of leader services to True
+    """
     return self.leader_services
 
   def get_leader_ports(self):
-    """Return the leader ports."""
+    """Return the leader ports.
+
+    Returns:
+    a list of ports used by processes that are leaders
+    """
     return self.leader_ports
 
 class WatchPyLeaders(WatchLeaders):
@@ -932,6 +952,9 @@ def _get_cmd_name(name, cmdline, ppid):
            '-O', '/usr/local/nutanix/cluster/bin/genesis',
            '--foreground=true']
   ppid: parent pid
+
+  Returns:
+  derived name including nutanix service name
   """
   if name == "bash" or name == "sh":
     if any("-" in arg and "c" in arg for arg in cmdline):
@@ -1068,6 +1091,9 @@ def _get_release_version():
   el6-release-danube-4.6-stable-49d75b8321ebbfe6ab56a25a99a061b3ed172954
   el6-release-euphrates-5.0-stable-8c575828b4598b2e70fc50f4d263be7a5e4efe57
   el6-dbg-master-d53cda03e4f293c4188cf736e5f41ec681bebd88
+
+  Returns:
+  a string containing the AOS release version
   """
   with open("/etc/nutanix/release_version") as rel:
     # return rel.readline().split("-", 2)[-1].rsplit("-", 1)[0]
@@ -1079,6 +1105,11 @@ def _do_subcommand(svm_ip, subcommand):
   Arguments:
   svm_ip: IP address of the CVM
   subcommand: the subcommand to run
+
+  Returns:
+  A boolean which is True on success, False on failure except when the
+  subcommand is version, when it simply prints the version to stdout and
+  exits.
   """
   import cluster.service.service_utils
 
@@ -1101,6 +1132,9 @@ def _do_subcommand(svm_ip, subcommand):
     svm_ips: list of IP address of the other CVMs in the cluster except
              the CVM on which this process is running. This is empty
              when running without the --cluster option.
+
+    Returns:
+    True on success. False on failure.
     """
     ret_val = True
 
@@ -1164,6 +1198,9 @@ def _do_subcommand(svm_ip, subcommand):
     svm_ips: list of IP address of the other CVMs in the cluster except
              the CVM on which this process is running. This is empty
              when running without the --cluster option.
+
+    Returns:
+    True on success. False on failure.
     """
     ret_val = True
 
@@ -1196,6 +1233,9 @@ def _do_subcommand(svm_ip, subcommand):
              the CVM on which this process is running. This is empty
              when running without the --cluster option.
     logging: log when True
+
+    Returns:
+    True on success. False on failure.
     """
     ret_val = True
 
@@ -1234,6 +1274,9 @@ def _do_subcommand(svm_ip, subcommand):
     svm_ips: list of IP address of the other CVMs in the cluster except
              the CVM on which this process is running. This is empty
              when running without the --cluster option.
+
+    Returns:
+    True on success. False on failure.
     """
     return _stop(svm_ip, svm_ips, False) and _start(svm_ip, svm_ips)
 
@@ -1244,6 +1287,9 @@ def _do_subcommand(svm_ip, subcommand):
     svm_ips: list of IP address of the other CVMs in the cluster except
              the CVM on which this process is running. This is empty
              when running without the --cluster option.
+
+    Returns:
+    True on success. False on failure.
     """
     FLAGS.logtostderr = True
     log.initialize()
@@ -1283,6 +1329,9 @@ def _do_subcommand(svm_ip, subcommand):
     svm_ips: list of IP address of the other CVMs in the cluster except
              the CVM on which this process is running. This is empty
              when running without the --cluster option.
+
+    Returns:
+    True on success. False on failure.
     """
     ret_val = True
 
@@ -1335,7 +1384,7 @@ def _do_subcommand(svm_ip, subcommand):
     return _uninstall(svm_ip, svm_ips)
 
   elif subcommand == "version":
-    return _version()
+    _version()
 
   else:
     _print_help()
@@ -1353,6 +1402,10 @@ def _tname(log_line):
 
   Arguments:
   log_line: log_line to which the thread name has to be prepended
+
+  Returns:
+  log_line with thread name appended if leadership is enabled because
+  more than one thread is running when leadership is enabled.
   """
   if FLAGS.leadership:
     return "%s %s" % (threading.current_thread().name, log_line)
@@ -1360,7 +1413,11 @@ def _tname(log_line):
   return log_line
 
 def _get_svm_ip():
-  """Get the IP address of the CVM. Exit in case of failures."""
+  """Get the IP address of the CVM. Exit in case of failures.
+
+  Returns:
+  string containing the IP address of the CVM
+  """
   svm_ip = genesis_utils.get_svm_ip()
   if svm_ip is None:
     print("Failed to get CVM IP", file=sys.stderr)
@@ -1375,7 +1432,11 @@ def _stop_leadership_watch_threads():
 
 def _set_signal_handler():
   """Set the signal handlers to handle SIGTERMs sent by
-  cluster.service.service_utils.stop_service."""
+  cluster.service.service_utils.stop_service.
+
+  Returns:
+  a threading.Event() which is set when the daemon is stopped
+  """
   import signal
 
   stop_event = threading.Event()
@@ -1403,11 +1464,33 @@ def _set_signal_handler():
 
   return stop_event
 
+def _log_gflag_values(foreground=False):
+  """Logs all the gflag values.
+  Arguments:
+  foreground: process is running in foreground mode if True.
+  """
+  log.DEBUG(_tname("Logging gflag values:"))
+  log.DEBUG(_tname("cluster: %s" % FLAGS.cluster))
+  if foreground:
+    log.DEBUG(_tname("count: %s" % FLAGS.count))
+  log.DEBUG(_tname("interval: %s" % FLAGS.interval))
+  log.DEBUG(_tname("leadership: %s" % FLAGS.leadership))
+  log.DEBUG(_tname("niceness: %s" % FLAGS.niceness))
+  log.DEBUG(_tname("output_dir: %s" % FLAGS.outpur_dir))
+
 def _parse_command_line_args(argv):
   """Parse the command line options and argument using gflags.
 
   Arguments:
   argv: gflags, command-line options and argument
+
+  Returns:
+  a tuple containing
+    argv: list of command-line arguments
+    daemon: boolean which is set to True if DAEMON_CMDLINE_OPTION is
+            part of the command-line options
+    self_monitor: boolean which is set to True if
+    SELF_MONITOR_CMDLINE_OPTION is part of the command-line options
   """
   try:
     # Parse the command-line options.
@@ -1474,6 +1557,8 @@ def main(argv):
 
     log.INFO(_tname("%s%s started with pid %d%s" % ("-" * 4, FILE_NAME,
                                                     os.getpid(), "-" * 4)))
+    _log_gflag_values(False)
+
     if not os.geteuid():
       # Required when running as a daemon.
       import grp
@@ -1500,8 +1585,11 @@ def main(argv):
       # iv) Foreground process mode
       FLAGS.logtostderr = True
       log.initialize()
+
       log.INFO(_tname("%s%s started with pid %d%s" % ("-" * 4, FILE_NAME,
                                                       os.getpid(), "-" * 4)))
+      _log_gflag_values(False)
+
       resource_mon = ResourceMon(_get_svm_ip())
       if not resource_mon.get_process_stats_count_times():
         sys.exit(1)
