@@ -201,14 +201,14 @@ import sys
 import threading
 import time
 
-sys.path.append("/home/nutanix/bin")  # install is run from ~nutanix directory.
+sys.path.append("/home/nutanix/bin")  # install can be run from anywhere.
 import env  # Add nutanix libraries to sys.path.
 
-import gflags
+import gflags  # pylint: disable=wrong-import-position
 
-import util.base.log as log
+import util.base.log as log  # pylint: disable=wrong-import-position
 
-genesis_utils = None
+genesis_utils = None  # pylint: disable=invalid-name
 
 FILE_NAME = os.path.basename(__file__)
 try:
@@ -286,7 +286,6 @@ class ResourceMon(object):
     output_file_name: append to output_dir/resource_mon.csv.out if
                       None, else write to output_dir/output_file_name
     """
-    import csv
     import psutil
 
     log.INFO(_tname("Getting system and process stats"))
@@ -294,7 +293,6 @@ class ResourceMon(object):
     ad_pids = []
     procs = []
     epoch = int(time.time())
-    date_time = time.strftime("%Y%m%d_%H%M%S")
     sys_mem = psutil.virtual_memory()
 
     # https://psutil.readthedocs.io/en/latest/#psutil.cpu_percent.
@@ -381,34 +379,51 @@ class ResourceMon(object):
       except psutil.NoSuchProcess:
         pass
       else:
-        proc._username = username
-        proc._ppid = ppid
-        proc._name = name
-        proc._rss = rss
-        proc._vms = vms
-        proc._pss = pss
-        proc._uss = uss
-        proc._swap = swap
-        proc._num_fds = num_fds
+        proc._username = username  # pylint: disable=protected-access
+        proc._ppid = ppid  # pylint: disable=protected-access
+        proc._name = name  # pylint: disable=protected-access
+        proc._rss = rss  # pylint: disable=protected-access
+        proc._vms = vms  # pylint: disable=protected-access
+        proc._pss = pss  # pylint: disable=protected-access
+        proc._uss = uss  # pylint: disable=protected-access
+        proc._swap = swap  # pylint: disable=protected-access
+        proc._num_fds = num_fds  # pylint: disable=protected-access
         # proc._ios = ios
-        proc._num_threads = num_threads
-        proc._cpu_percent = cpu_percent
+        proc._num_threads = num_threads  # pylint: disable=protected-access
+        proc._cpu_percent = cpu_percent  # pylint: disable=protected-access
         if FLAGS.leadership:
+          # pylint: disable=protected-access
           proc._leader = str(leader).upper()
-        proc._timestamp = int(time.time())
+        proc._timestamp = int(time.time())  # pylint: disable=protected-access
         procs.append(proc)
 
     log.INFO(_tname("Got stats for %d processes" % len(procs)))
     if ad_pids:
       log.WARNING(_tname("Access denied for %d processes" % len(ad_pids)))
 
-    # Sort in descending order of pss.
-    procs.sort(key=lambda proc: proc._pss, reverse=True)
+    self.__write_stats(output_file_name, epoch, sys_mem, sys_cpu, procs)
+
+  def __write_stats(self, output_file_name, epoch, sys_mem, sys_cpu, procs):
+    """Write system and process stats to the output file.
+
+    Arguments:
+    epoch: epoch at which the stats were collected.
+    sys_mem: stats about system memory usage as a named tuple.
+    sys_cpu: CPU utilization percentage as a named tuple.
+    procs: list of psutil.Process objects with collected process stats.
+    """
+    import csv
+
+    log.DEBUG(_tname("Writing collected stats"))
+
+    date_time = time.strftime("%Y%m%d_%H%M%S", time.localtime(epoch))
+
     if output_file_name is None:
       output_file = os.path.join(FLAGS.output_dir, "resource_mon.%s_%s.csv.out"
                                  % (self.__svm_ip, date_time))
     else:
       output_file = os.path.join(FLAGS.output_dir, output_file_name)
+
     with run_as_nutanix_user():
       with open(output_file, "ab") as out:
         # Write some metadata.
@@ -438,7 +453,9 @@ class ResourceMon(object):
 
         num_threads_sys = 0
         num_fds_sys = 0
-        for proc in procs:
+        # Sort in descending order of pss.
+        # pylint: disable=protected-access
+        for proc in procs.sort(key=lambda proc: proc._pss, reverse=True):
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
                  proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
                  proc._swap, proc._num_fds, proc._num_threads,
@@ -474,14 +491,18 @@ class ResourceMon(object):
     stop_event: stop event used to stop the WatchLeaders threads
     """
     _make_directories()
+    # pylint: disable=attribute-defined-outside-init
     self.__rel_ver = _get_release_version()
     if FLAGS.leadership:
+      # pylint: disable=attribute-defined-outside-init
       self.__watch_leaders = WatchLeaders(self.__svm_ip,
                                           "/appliance/logical/leaders",
                                           stop_event)
+      # pylint: disable=attribute-defined-outside-init
       self.__watch_py_leaders = WatchPyLeaders(self.__svm_ip,
                                                "/appliance/logical/pyleaders",
                                                stop_event)
+      # pylint: disable=attribute-defined-outside-init
       self.__watch_go_leaders = WatchGoLeaders(self.__svm_ip,
                                                "/appliance/logical/goleaders",
                                                stop_event)
@@ -607,6 +628,7 @@ class WatchLeaders(threading.Thread):
 
     import re
     # zk node value regex.
+    # pylint: disable=anomalous-backslash-in-string
     self.__leadership_regex = re.compile("Handle: (.*) Currently leader "
                                          "\(Y/N\): (.*)")
     # Mapping from zk node name to process name.
@@ -691,7 +713,7 @@ class WatchLeaders(threading.Thread):
               if port is not None:
                 self.leader_ports.append(port)
           break
-      except Exception:
+      except Exception:  # pylint: disable=broad-except
         import traceback
         log.ERROR(_tname("Error when parsing '%s' in %s\n%s" %
                          (value, service_node_path, traceback.format_exc())))
@@ -832,7 +854,7 @@ class WatchPyLeaders(WatchLeaders):
     except IndexError:
       log.DEBUG(_tname("No zk children in %s" % service_leadership_path))
     # Do not want an error while parsing one zknode to stop the thread.
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
       import traceback
       log.ERROR(_tname("Error when parsing %s\n%s" %
                        (service_leadership_path, traceback.format_exc())))
@@ -894,7 +916,7 @@ class WatchGoLeaders(WatchLeaders):
     except IndexError:
       log.DEBUG(_tname("No zk children in %s" % service_leadership_path))
     # Do not want an error while parsing one zknode to stop the thread.
-    except Exception:
+    except Exception:  # pylint: disable=broad-except
       import traceback
       log.ERROR(_tname("Error when parsing %s\n%s" %
                        (service_leadership_path, traceback.format_exc())))
@@ -1439,7 +1461,8 @@ def main(argv):
   # Especially important for me to have very little memory footprint
   # considering I will mostly be used when system memory is really low.
   # Hence trading off convention for being lean.
-  global genesis_utils
+  global genesis_utils  # pylint: disable=invalid-name,global-statement
+  # pylint: disable=redefined-outer-name
   from cluster import genesis_utils as genesis_utils
 
   log_file = os.path.join(NUTANIX_LOG_DIR, "%s.%s" % (FILE_NAME, "log"))
