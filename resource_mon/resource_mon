@@ -326,6 +326,7 @@ class ResourceMon(object):
     sys_cpu = psutil.cpu_percent(percpu=True)
 
     for proc in psutil.process_iter():
+      #with proc.oneshot():  # Use with psutil 5.0.0+ for +2.6x speedup.
       try:
         try:
           username = proc.username()
