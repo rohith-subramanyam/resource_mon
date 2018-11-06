@@ -82,10 +82,11 @@ the system/cluster that it has access to:
 9. vms: aka "Virtual Memory Size", this is the total amount of virtual
         memory used by the process. It matches top's VIRT column
 10. swap: amount of memory that has been swapped out to disk
-11. num_fds: number of file descriptors currently opened by this
+11. num_fds: number of file descriptors currently opened by the
              process (non cumulative)
-12. num_threads: number of threads currently used by this process
+12. num_threads: number of threads currently used by the process
                  (non cumulative)
+13. num_children: number of children of the process
 13. cpu_percent: process CPU utilization as a percentage which can also
                 be > 100.0 in case of a process running multiple
                 threads on different CPUs. Can be disabled with
@@ -356,6 +357,7 @@ class ResourceMon(object):
         num_fds = proc.num_fds()
         # ios = proc.io_counters()
         num_threads = proc.num_threads()
+        num_children = len(proc.children())
         if FLAGS.process_cpu:
           cpu_percent = proc.cpu_percent(interval=0.1)
 
@@ -405,6 +407,7 @@ class ResourceMon(object):
         proc._num_fds = num_fds  # pylint: disable=protected-access
         # proc._ios = ios
         proc._num_threads = num_threads  # pylint: disable=protected-access
+        proc._num_children = num_children  # pylint: disable=protected-access
         if FLAGS.process_cpu:
           proc._cpu_percent = cpu_percent  # pylint: disable=protected-access
         if FLAGS.leadership:
@@ -461,7 +464,7 @@ class ResourceMon(object):
         # Header.
         header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", "uss(kB)",
                   "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "num_threads",
-                  "timestamp"]
+                  "num_children", "timestamp"]
         if FLAGS.process_cpu:
           # Insert in the 2nd last position before timestamp.
           header.insert(-1, "cpu_percent")
@@ -481,7 +484,8 @@ class ResourceMon(object):
         for proc in procs:
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
                  proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
-                 proc._swap, proc._num_fds, proc._num_threads, proc._timestamp]
+                 proc._swap, proc._num_fds, proc._num_threads,
+                 proc._num_children, proc._timestamp]
           if FLAGS.process_cpu:
             # Insert in the 2nd last position before timestamp.
             row.insert(-1, proc._cpu_percent)
