@@ -47,11 +47,12 @@ the system/cl that it has access to:
 8. **rss:** aka `Resident Set Size`, this is the non-swapped physical memory a process has used. It matches top's RES column.
 9. **vms:** aka `Virtual Memory Size`, this is the total amount of virtual memory used by the process. It matches top's VIRT column.
 10. **swap:** amount of memory that has been swapped out to disk
-11. **num_fds:** number of file descriptors currently opened by this process (non cumulative)
-12. **num_threads:** number of threads currently used by this process (non cumulative)
-13. **cpu_percent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs. Can be disabled with --noprocess_cpu option as it adds a delay of 0.1 seconds per process.
-14. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader. Can be disabled with --noleadership option.
-15. **timestamp:** the epoch at which the above stats were collected
+11. **num_fds:** number of file descriptors currently opened by the process (non cumulative)
+12. **num_threads:** number of threads currently used by the process (non cumulative)
+13. **num_children:** number of children of the process (non-recursive)
+14. **cpu_percent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs. Can be disabled with --noprocess_cpu option as it adds a delay of 0.1 seconds per process.
+15. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader. Can be disabled with --noleadership option.
+16. **timestamp:** the epoch at which the above stats were collected
 
 ## Install
 Like everything at Nutanix, it is simple and 1-click.
