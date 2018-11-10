@@ -258,7 +258,8 @@ gflags.DEFINE_integer(name="niceness",
                       default=10,
                       help=("Set niceness which affects process scheduling. "
                             "It ranges from -20 (most favorable scheduling) to"
-                            " 19 (least favorable)."),
+                            " 19 (least favorable). Can set niceness < 0 only "
+                            "as root."),
                       short_name="s")
 
 gflags.DEFINE_string(name="output_dir",
@@ -287,8 +288,14 @@ class ResourceMon(object):
 
     # By default, unless not overridden, reduce the priority since I am
     # only a monitoring process :(.
-    niceness = os.nice(FLAGS.niceness)
-    log.INFO("Set niceness to %d" % niceness)
+    try:
+      niceness = os.nice(FLAGS.niceness)
+    except OSError as ose:
+      if ose.errno == 1:
+        log.WARNING("Cannot increase priority (decrease the niceness to %d) "
+                    "without root" % FLAGS.niceness)
+    else:
+      log.INFO("Set niceness to %d" % niceness)
 
     self.__cpu_percent_called = False
 
