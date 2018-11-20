@@ -39,7 +39,7 @@ Gets the following system-level stats:
 
 ### Process
 Gets the following process-level stats of all the running processes in
-the system/cl that it has access to:
+the system/cluster that it has access to:
 1. **ip:** IP address of the node in which the process is run
 2. **uid:** name of the user that owns the process
 3. **pid:** process ID of the process
