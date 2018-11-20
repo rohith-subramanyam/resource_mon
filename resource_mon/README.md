@@ -8,21 +8,17 @@ $ scp experimental/resource_mon/resource_mon nutanix@<node_ip_or_name>:~/  # Cop
 $ ssh nutanix@<node_ip_or_node>
 
 nutanix@<node>:~$ # 2) Install.
-nutanix@<node>:~$ ./resource_mon [--cluster] install  # Install to ~nutanix/bin
+nutanix@<node>:~$ ./resource_mon [--cluster] install  # Install to ~nutanix/bin.
 nutanix@<node>:~$ rm ./resource_mon  # Delete the installer.
 nutanix@<node>:~$ resource_mon --help
 nutanix@<node>:~$ # 3) Run.
-nutanix@<node>:~$ # Control the service.
-nutanix@<node>:~$ resource_mon [--cluster] start|status|stop|restart
-nutanix@<node>:~$ # Run as sudo to gets stats of processes owned by all
-nutanix@<node>:~$ # users including root.
-nutanix@<node>:~$ sudo /home/nutanix/bin/resource_mon [--cluster]
-                  start|status|stop|restart
+nutanix@<node>:~$ resource_mon [--cluster] start|status|stop|restart  # Control the service.
+nutanix@<node>:~$ # or 
+nutanix@<node>:~$ sudo /home/nutanix/bin/resource_mon [--cluster] start|status|stop|restart  # Run as sudo to gets stats of processes owned by all users including root.
 nutanix@<node>:~$ # 4) Output.
-nutanix@<node>:~$ # Check output in data/logs/resource_mon.csv.out.
-nutanix@<node>:~$ vi data/logs/resource_mon.csv.out
+nutanix@<node>:~$ vi data/logs/resource_mon.csv.out  # Check output in data/logs/resource_mon.csv.out.
 
-nutanix@<node>:~$ # 5) Uninstall resource_mon.
+nutanix@<node>:~$ # 5) Uninstall.
 nutanix@<node>:~$ resource_mon [--cluster] uninstall
 ```
 If you skip the `--cluster` option, the default behavior is to perform the operation only on the node.<br/><br/>
