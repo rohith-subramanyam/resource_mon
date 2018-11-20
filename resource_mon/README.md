@@ -8,8 +8,7 @@ $ scp experimental/resource_mon/resource_mon nutanix@<node_ip_or_name>:~/  # Cop
 $ ssh nutanix@<node_ip_or_node>
 
 nutanix@<node>:~$ # 2) Install.
-nutanix@<node>:~$ ./resource_mon [--cluster] install  # Install to
-~nutanix/bin
+nutanix@<node>:~$ ./resource_mon [--cluster] install  # Install to ~nutanix/bin
 nutanix@<node>:~$ rm ./resource_mon  # Delete the installer.
 nutanix@<node>:~$ resource_mon --help
 nutanix@<node>:~$ # 3) Run.
