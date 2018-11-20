@@ -2,25 +2,33 @@
 ## TL;DR
 If you don't want to read a long README file, the below section is enough to get you started.
 ```shell
-~ $ git clone git@drt-it-github-prod-1.eng.nutanix.com:rohith-subramanyam/experimental.git
-~ $ ./experimental/resource_mon/resource_mon [--cluster] install  # Copies the file to ~nutanix/bin.
-~ $ rm -rf experimental  # Delete the installer.
-~ $ resource_mon --help
-~ $ resource_mon [--cluster] start|status|stop|restart  # Control the service.
-~ $ # or
-~ $ resource_mon  # If you want to just run it as a foreground process and get one reading.
-~ $ # or
-~ $ resource_mon [--count=n]  # If you want to just run it as a foreground process and get n readings.
-~ $ resource_mon [--cluster] uninstall  # Uninstall resource_mon.
+$ # 1) Deploy.
+$ git clone git@drt-it-github-prod-1.eng.nutanix.com:rohith-subramanyam/experimental.git
+$ scp experimental/resource_mon/resource_mon nutanix@<node_ip_or_name>:~/  # Copy resource_mon over to the node you want to diagnose.
+$ ssh nutanix@<node_ip_or_node>
+
+nutanix@<node>:~$ # 2) Install.
+nutanix@<node>:~$ ./resource_mon [--cluster] install  # Install to
+~nutanix/bin
+nutanix@<node>:~$ rm ./resource_mon  # Delete the installer.
+nutanix@<node>:~$ resource_mon --help
+nutanix@<node>:~$ # 3) Run.
+nutanix@<node>:~$ # Control the service.
+nutanix@<node>:~$ resource_mon [--cluster] start|status|stop|restart
+nutanix@<node>:~$ # Run as sudo to gets stats of processes owned by all
+nutanix@<node>:~$ # users including root.
+nutanix@<node>:~$ sudo /home/nutanix/bin/resource_mon [--cluster]
+                  start|status|stop|restart
+nutanix@<node>:~$ # 4) Output.
+nutanix@<node>:~$ # Check output in data/logs/resource_mon.csv.out.
+nutanix@<node>:~$ vi data/logs/resource_mon.csv.out
+
+nutanix@<node>:~$ # 5) Uninstall resource_mon.
+nutanix@<node>:~$ resource_mon [--cluster] uninstall
 ```
 If you skip the `--cluster` option, the default behavior is to perform the operation only on the node.<br/><br/>
-Default interval between readings is `120` seconds. If you want to adjust it pass the command-line option `--interval=m` seconds.
-### sudo
-Run as sudo to gets stats of processes owned by all users including root.
-```shell
-sudo /home/nutanix/bin/resource_mon [--cluster] start|status|stop|restart
-```
-It might consume high CPU for a few seconds every interval seconds if you run it as sudo.
+Default interval between readings is `120` seconds. If you want to adjust it pass the command-line option `--interval=m` seconds.<br/><br/>
+P.S.: It might consume high CPU for a few seconds every interval seconds if you run it as sudo.
 
 ## What is it?
 Resource Monitor is a tool to monitor the memory, CPU and other resources on a Nutanix CVM at a system and process level.
@@ -78,6 +86,15 @@ resource_mon [--cluster] status | stop
 Runs in the foreground, gets stats once every "interval" seconds "count" number of times and writes stats to a new file `output_dir/resource_mon.IP_YYYYMMDD_HHMMSS.csv.out` for each iteration of count.
 ```shell
 resource_mon [--cluster] [--count=M] [--interval=N] [--[no]leadership] [--niceness=S] [--output_dir=/home/nutanix]
+```
+Examples:-
+1) Run it as a foreground process and get one reading:
+```shell
+$ resource_mon
+```
+2) Run it as a foreground process and get n readings:
+```shell
+$ resource_mon [--count=n]
 ```
 
 ## Output

@@ -3,23 +3,33 @@
 -----------------------------------------------------------------------
 TL;DR
 -----------------------------------------------------------------------
-~ $ git clone
+
+$ # 1) Deploy.
+$ git clone
 git@drt-it-github-prod-1.eng.nutanix.com:rohith-subramanyam/experimental.git
-~ $ # Copy the file to ~nutanix/bin.
-~ $ ./experimental/resource_mon/resource_mon [--cluster] install
-~ $ rm -rf experimental  # Delete the installer.
-~ $ resource_mon --help
-~ $ # Control the service.
-~ $ resource_mon [--cluster] start|status|stop|restart
-~ $ # or
-~ $ # If you want to just run it as a foreground process and get one
-~ $ # reading.
-~ $ resource_mon
-~ $ # or
-~ $ # If you want to just run it as a foreground process and get n
-~ $ # readings.
-~ $ resource_mon [--count=n]
-~ $ resource_mon [--cluster] uninstall  # Uninstall resource_mon.
+$ # Copy resource_mon over to the node you want to diagnose.
+$ scp experimental/resource_mon/resource_mon
+  nutanix@<node_ip_or_name>:~/
+$ ssh nutanix@<node_ip_or_node>
+
+nutanix@<node>:~$ # 2) Install.
+nutanix@<node>:~$ # Install to ~nutanix/bin.
+nutanix@<node>:~$ ./resource_mon [--cluster] install
+nutanix@<node>:~$ rm ./resource_mon  # Delete the installer.
+nutanix@<node>:~$ resource_mon --help
+nutanix@<node>:~$ # 3) Run.
+nutanix@<node>:~$ # Control the service.
+nutanix@<node>:~$ resource_mon [--cluster] start|status|stop|restart
+nutanix@<node>:~$ # Run as sudo to gets stats of processes owned by all
+nutanix@<node>:~$ # users including root.
+nutanix@<node>:~$ sudo /home/nutanix/bin/resource_mon [--cluster]
+                  start|status|stop|restart
+nutanix@<node>:~$ # 4) Output.
+nutanix@<node>:~$ # Check output in data/logs/resource_mon.csv.out.
+nutanix@<node>:~$ vi data/logs/resource_mon.csv.out
+
+nutanix@<node>:~$ # 5) Uninstall resource_mon.
+nutanix@<node>:~$ resource_mon [--cluster] uninstall
 
 If you skip the `--cluster` option, the default behavior is to perform
 the operation only on the node.
@@ -27,14 +37,8 @@ the operation only on the node.
 Default interval between readings is `120` seconds. If you want to
 adjust it, pass the command-line option `--interval=m` seconds.
 
-----
-sudo
-----
-Run as sudo to gets stats of processes owned by all users including root.
-$ sudo /home/nutanix/bin/resource_mon [--cluster] start|status|stop|
-                                                  restart
-It might consume high CPU for a few seconds every interval seconds if
-you run it as sudo.
+P.S.: It might consume high CPU for a few seconds every interval seconds
+if you run it as sudo.
 
 -----------------------------------------------------------------------
 What is it?
@@ -134,6 +138,11 @@ of count.
 $ resource_mon [--cluster] [--count=M] [--interval=N]
                [--[no]leadership] [--niceness=S]
                [--output_dir=/home/nutanix]
+Examples:-
+1) Run it as a foreground process and get one reading:
+$ resource_mon
+2) Run it as a foreground process and get n readings:
+$ resource_mon [--count=n]
 
 -----------------------------------------------------------------------
 Output
