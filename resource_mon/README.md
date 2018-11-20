@@ -60,10 +60,15 @@ the system/cl that it has access to:
 ## Install
 Like everything at Nutanix, it is simple and 1-click.
 ```shell
-~ $ git clone git@drt-it-github-prod-1.eng.nutanix.com:rohith-subramanyam/experimental.git
-~ $ ./experimental/resource_mon/resource_mon [--cluster] install  # Copies the file to ~nutanix/bin.
-~ $ rm -rf experimental  # Delete the installer.
-~ $ resource_mon --help
+$ # 1) Deploy.
+$ git clone git@drt-it-github-prod-1.eng.nutanix.com:rohith-subramanyam/experimental.git
+$ scp experimental/resource_mon/resource_mon nutanix@<node_ip_or_name>:~/  # Copy resource_mon over to the node you want to diagnose.
+$ ssh nutanix@<node_ip_or_node>
+
+nutanix@<node>:~$ # 2) Install.
+nutanix@<node>:~$ ./resource_mon [--cluster] install  # Install to ~nutanix/bin.
+nutanix@<node>:~$ rm ./resource_mon  # Delete the installer.
+nutanix@<node>:~$ resource_mon --help
 ```
 
 ## Run
