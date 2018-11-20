@@ -258,7 +258,7 @@ gflags.DEFINE_integer(name="count",
 
 gflags.DEFINE_integer(name="interval",
                       default=120,
-                      help=("time in seconds between which the system and "
+                      help=("Time in seconds between which the system and "
                             "process stats are collected. Note that this "
                             "interval is not guaranteed if each iteration "
                             "takes more than interval seconds."),
@@ -270,6 +270,13 @@ gflags.DEFINE_boolean(name="leadership",
                             "if the nutanix process running on the node is a "
                             "leader or not."),
                       short_name="l")
+
+gflags.DEFINE_integer(name="max_output_file_size_mib",
+                      default=128,
+                      help=("Max size in MiB of the output file before it is "
+                            "rotated so that old file can be consumed by "
+                            "scavenger"),
+                      short_name="m")
 
 gflags.DEFINE_integer(name="niceness",
                       default=10,
@@ -315,14 +322,10 @@ class ResourceMon(object):
       log.INFO("Set niceness to %d" % niceness)
 
     self.__cpu_percent_called = False
+    self.__output_file = None
 
-  def __get_stats(self, output_file_name=None):
-    """Get system and process stats once and write to the output file.
-
-    Arguments:
-    output_file_name: append to output_dir/resource_mon.csv.out if
-                      None, else write to output_dir/output_file_name
-    """
+  def __get_stats(self):
+    """Get system and process stats once and write to the output file."""
     import psutil
 
     log.INFO(_tname("Getting system and process stats every %d seconds" %
@@ -444,9 +447,9 @@ class ResourceMon(object):
     if ad_pids:
       log.WARNING(_tname("Access denied for %d processes" % len(ad_pids)))
 
-    self.__write_stats(output_file_name, epoch, sys_mem, sys_cpu, procs)
+    self.__write_stats(epoch, sys_mem, sys_cpu, procs)
 
-  def __write_stats(self, output_file_name, epoch, sys_mem, sys_cpu, procs):
+  def __write_stats(self, epoch, sys_mem, sys_cpu, procs):
     """Write system and process stats to the output file.
 
     Arguments:
@@ -459,16 +462,11 @@ class ResourceMon(object):
 
     log.DEBUG(_tname("Writing collected stats"))
 
-    date_time = time.strftime("%Y%m%d_%H%M%S", time.localtime(epoch))
-
-    if output_file_name is None:
-      output_file = os.path.join(FLAGS.output_dir, "resource_mon.%s_%s.csv.out"
-                                 % (self.__svm_ip, date_time))
-    else:
-      output_file = os.path.join(FLAGS.output_dir, output_file_name)
+    date_time = time.strftime("%Y%m%d-%H%M%S", time.localtime(epoch))
 
     with run_as_nutanix_user():
-      with open(output_file, "ab") as out:
+      self.__rotate_output_file(date_time)
+      with open(self.__output_file, "ab") as out:
         # Write some metadata.
         print("# TIMESTAMP: %s %s" % (epoch, date_time), file=out)
         print("# Release version: %s" % self.__rel_ver, file=out)
@@ -524,10 +522,70 @@ class ResourceMon(object):
               file=out)
         print("# Total no. of FDs in the system: %s" % num_fds_sys, file=out)
 
-    if output_file_name is None:
-      log.INFO(_tname("Wrote %s" % output_file))
+    log.INFO(_tname("Wrote output to %s" % self.__output_file))
+
+  def __rotate_output_file(self, date_time):
+    """1) Initializes the output file for the first time.
+    2) In subsequent runs, if the size of output_file is greater than
+    FLAGS.max_output_file_size_mib, it rotates the log file (creates a
+    new output file) so that old file can be consumed by scavenger.
+    3) Maintains a symlink to the latest output file.
+
+    Arguments:
+    date_time: date and time in the format YYYYMMDD-HHMMMSS at which
+               the stats were collected last. This is used as a suffix
+               in the name of new output file.
+    """
+    rotate_output_file = False
+    # 1) Initializes the output file for the first time.
+    if self.__output_file is None:
+      rotate_output_file = True
+    # 2) In subsequent runs, if the size of output_file is greater than
+    # FLAGS.max_output_file_size_mib, it rotates the log file (creates a
+    # new output file) so that old file can be consumed by scavenger.
+    elif os.path.isfile(self.__output_file):
+      file_size = os.path.getsize(self.__output_file)
+      max_output_file_size_bytes = FLAGS.max_output_file_size_mib * 1024 * 1024
+      log.DEBUG("Current output file %s size: %s bytes. Max output file size: "
+                "%s bytes" % (self.__output_file, file_size,
+                              max_output_file_size_bytes))
+      if file_size >= max_output_file_size_bytes:
+        log.INFO("Size of current output file %s: %s bytes exceeds max output "
+                 "file size %s" % (self.__output_file, file_size,
+                                   max_output_file_size_bytes))
+        rotate_output_file = True
     else:
-      log.INFO(_tname("Appended to %s" % output_file))
+      rotate_output_file = True
+
+    if rotate_output_file:
+      output_file_name_prefix = "%s.csv.out" % FILE_NAME
+      output_file_name = "%s.%s" % (output_file_name_prefix, date_time)
+      self.__output_file = os.path.join(FLAGS.output_dir, output_file_name)
+      log.INFO("Output will be written to new file %s" % self.__output_file)
+
+      # 3) Maintains a symlink to the latest output_file.
+      symlink_path = os.path.join(FLAGS.output_dir, output_file_name_prefix)
+      relative_pathname = os.path.relpath(self.__output_file, FLAGS.output_dir)
+      try:
+        # Wrote output file to symlink_path in a previous version. If
+        # such output files exist, then back it up.
+        if os.path.isfile(symlink_path) and not os.path.islink(symlink_path):
+          bkp_path = "%s.bkp" % symlink_path
+          log.INFO("Backing up older version of output file %s to %s" %
+                   (symlink_path, bkp_path))
+          os.rename(symlink_path, bkp_path)
+        elif os.path.isfile(symlink_path):
+          os.unlink(symlink_path)
+        elif os.path.isdir(symlink_path):
+          log.FATAL("%s already exists as a directory. Please remove it and "
+                    "restart" % symlink_path)
+
+        log.INFO("Creating symlink %s to %s" % (symlink_path,
+                                                relative_pathname))
+        os.symlink(relative_pathname, symlink_path)
+      except OSError as exc:
+        log.ERROR("Error when creating symlink to the latest output file: %s" %
+                  exc)
 
   def __get_leader_ports(self):
     """Return the leader ports from all the leadership watchers.
@@ -660,7 +718,7 @@ class ResourceMon(object):
       time_now = time.time()
       if time_now - last_start_time > FLAGS.interval:
         last_start_time = time_now
-        self.__get_stats("resource_mon.csv.out")
+        self.__get_stats()
         # Check for stop event just before you go to sleep in order to
         # be more responsive to stop command.
         if stop_event.is_set():
@@ -1124,10 +1182,8 @@ def run_as_nutanix_user():
 
 def _make_directories():
   """Make the directories required for this process."""
-  # self.__work_dir = os.path.join(FLAGS.output_dir, ".work")
   # Directories should be owned by nutanix user.
   with run_as_nutanix_user():
-    # for directory in [FLAGS.output_dir, self.__work_dir]:
     for directory in [FLAGS.output_dir]:
       if not os.path.isdir(directory):
         # Errors out if output_dir is a file or the parent directory
