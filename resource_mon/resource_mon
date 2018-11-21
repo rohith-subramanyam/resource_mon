@@ -272,7 +272,7 @@ gflags.DEFINE_boolean(name="leadership",
                       short_name="l")
 
 gflags.DEFINE_integer(name="max_output_file_size_mib",
-                      default=128,
+                      default=20,
                       help=("Max size in MiB of the output file before it is "
                             "rotated so that old file can be consumed by "
                             "scavenger"),
