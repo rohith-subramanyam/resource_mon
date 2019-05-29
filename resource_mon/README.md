@@ -46,16 +46,22 @@ the system/cluster that it has access to:
 4. **ppid:** process ID of the parent process
 5. **name:** name of the process (deciphers nutanix service name from its command-line)
 6. **pss:** aka `Proportional Set Size`, is the amount of memory shared with other processes, accounted in a way that the amount is divided evenly between the processes that share it. I.e., if a process has 10 MBs all to itself and 10 MBs shared with another process its PSS will be 15 MBs.
-7. **uss:** aka `Unique Set Size`, this is the memory which is unique to a process and which would be freed if the process was terminated right now
-8. **rss:** aka `Resident Set Size`, this is the non-swapped physical memory a process has used. It matches top's RES column.
-9. **vms:** aka `Virtual Memory Size`, this is the total amount of virtual memory used by the process. It matches top's VIRT column.
-10. **swap:** amount of memory that has been swapped out to disk
-11. **num_fds:** number of file descriptors currently opened by the process (non cumulative)
-12. **num_threads:** number of threads currently used by the process (non cumulative)
-13. **num_children:** number of children of the process (non-recursive)
-14. **cpu_percent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs. Can be disabled with --noprocess_cpu option as it adds a delay of 0.1 seconds per process.
-15. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader. Can be disabled with --noleadership option.
-16. **timestamp:** the epoch at which the above stats were collected
+7. **rss:** aka `Resident Set Size`, is the non-swapped physical memory a process has used. It matches top's RES column.
+8. **vms:** aka `Virtual Memory Size`, is the total amount of virtual memory used by the process. It matches top's VIRT column.
+9. **private_clean:** is the amount of memory taken by the process' pages in the mapping that have been read and not written by this process but not referenced by any other process
+10. **private_dirty:** is the amount of memory taken by the process' pages in the mapping that have been read written by this process but not referenced by any other process
+11. **shared_clean:** is the amount of memory taken by the process' pages in the mapping that have been referenced by this process and at least one other process, but not written by any process
+12. **shared_dirty:** is the amount of memory taken by the process' pages in the mapping that have been referenced by this process and at least one other process, and written by at least one of those processes
+13. **swap:** amount of memory that has been swapped out to disk
+14. **num_fds:** number of file descriptors currently opened by the process (non cumulative)
+15. **num_threads:** number of threads currently used by the process (non cumulative)
+16. **num_children:** number of children of the process (non-recursive)
+17. **cpu_percent:** process CPU utilization as a percentage which can also be > 100.0 in case of a process running multiple threads on different CPUs. Can be disabled with `--noprocess_cpu` option as it adds a delay of 0.1 seconds per process.
+18. **leader:** this is set to TRUE if the process is a Nutanix service and the service leader. Can be disabled with `--noleadership` option.
+19. **timestamp:** the epoch at which the above stats were collected
+
+#### Deprecated attributes:
+1. **uss:** aka `Unique Set Size`, is the memory which is unique to a process and which would be freed if the process was terminated right now. This can be got by summing up **private_clean** and **private_shared**.
 
 ## Install
 Like everything at Nutanix, it is simple and 1-click.

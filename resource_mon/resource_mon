@@ -79,28 +79,46 @@ the system/cluster that it has access to:
         evenly between the processes that share it. I.e., if a process
         has 10 MBs all to itself and 10 MBs shared with another process
         its PSS will be 15 MBs.
-7. uss: aka "Unique Set Size", this is the memory which is unique to a
-        process and which would be freed if the process was terminated
-        right now
-8. rss: aka "Resident Set Size", this is the non-swapped physical
-        memory a process has used. It matches top's RES column
-9. vms: aka "Virtual Memory Size", this is the total amount of virtual
-        memory used by the process. It matches top's VIRT column
-10. swap: amount of memory that has been swapped out to disk
-11. num_fds: number of file descriptors currently opened by the
+7. rss: aka "Resident Set Size", is the non-swapped physical memory a
+        process has used. It matches top's RES column.
+8. vms: aka "Virtual Memory Size", is the total amount of virtual
+        memory used by the process. It matches top's VIRT column.
+9. private_clean: is the amount of memory taken by the process' pages
+                   in the mapping that have been read and not written
+                   by this process but not referenced by any other
+                   process
+10. private_dirty: is the amount of memory taken by the process' pages
+                   in the mapping that have been read written by this
+                   process but not referenced by any other process
+11. shared_clean: is the amount of memory taken by the process' pages
+                  in the mapping that have been referenced by this
+                  process and at least one other process, but not
+                  written by any process
+12. shared_dirty: is the amount of memory taken by the process' pages
+                  in the mapping that have been referenced by this
+                  process and at least one other process, and written
+                  by at least one of those processes
+13. swap: amount of memory that has been swapped out to disk
+14. num_fds: number of file descriptors currently opened by the
              process (non cumulative)
-12. num_threads: number of threads currently used by the process
+15. num_threads: number of threads currently used by the process
                  (non cumulative)
-13. num_children: number of children of the process (non-recursive)
-14. cpu_percent: process CPU utilization as a percentage which can also
+16. num_children: number of children of the process (non-recursive)
+17. cpu_percent: process CPU utilization as a percentage which can also
                  be > 100.0 in case of a process running multiple
                  threads on different CPUs. Can be disabled with
                  --noprocess_cpu option as it adds a delay of 0.1
                  seconds per process.
-15. leader: this is set to TRUE if the process is a Nutanix service and
+18. leader: this is set to TRUE if the process is a Nutanix service and
             the service leader. Can be disabled with --noleadership
             option.
-16. timestamp: the epoch at which the above stats were collected
+19. timestamp: the epoch at which the above stats were collected
+
+Deprecated attributes:
+1. uss: aka "Unique Set Size", is the memory which is unique to a
+        process and which would be freed if the process was terminated
+        right now. This can be derived by summing up private_clean and
+        private_shared.
 
 -----------------------------------------------------------------------
 Install
@@ -373,16 +391,25 @@ class ResourceMon(object):
         # rss = sum(pmmap.rss for pmmap in proc.memory_maps()) / 1000
         rss = proc.memory_info().rss / 1000
         vms = proc.memory_info().vms / 1000
-        # Use proc.memory_full_info().pss in psutil 4.0.0+
+        # Use proc.memory_full_info().pss in psutil 4.0.0+.
         pss = sum(pmmap.pss for pmmap in proc.memory_maps()) / 1000
-        # Use proc.memory_full_info().uss in psutil 4.0.0+
-        uss = (sum(pmmap.private_clean for pmmap in proc.memory_maps()) +
-               sum(pmmap.private_dirty for pmmap in proc.memory_maps())) / 1000
+        # Use proc.memory_full_info().uss in psutil 4.0.0+.
+        #uss = (sum(pmmap.private_clean for pmmap in proc.memory_maps()) +
+               #sum(pmmap.private_dirty for pmmap in proc.memory_maps())) / 1000
+        pvt_clean = (sum(pmmap.private_clean for pmmap in proc.memory_maps()) /
+                     1000)
+        pvt_dirty = (sum(pmmap.private_dirty for pmmap in proc.memory_maps()) /
+                     1000)
+        # Use proc.memory_full_info().shared in psutil 4.0.0+.
+        shared_clean = (sum(pmmap.shared_clean for pmmap in proc.memory_maps())
+                        / 1000)
+        shared_dirty = (sum(pmmap.shared_dirty for pmmap in proc.memory_maps())
+                        / 1000)
         # Use proc.memory_full_info().swap in psutil 4.0.0+
         swap = sum(pmmap.swap for pmmap in proc.memory_maps()) / 1000
 
         num_fds = proc.num_fds()
-        # ios = proc.io_counters()
+        #ios = proc.io_counters()
         num_threads = proc.num_threads()
         num_children = len(proc.children())
         if FLAGS.process_cpu:
@@ -429,10 +456,14 @@ class ResourceMon(object):
         proc._rss = rss  # pylint: disable=protected-access
         proc._vms = vms  # pylint: disable=protected-access
         proc._pss = pss  # pylint: disable=protected-access
-        proc._uss = uss  # pylint: disable=protected-access
+        #proc._uss = uss  # pylint: disable=protected-access
+        proc._pvt_clean = pvt_clean  # pylint: disable=protected-access
+        proc._pvt_dirty = pvt_dirty  # pylint: disable=protected-access
+        proc._shared_clean = shared_clean  # pylint: disable=protected-access
+        proc._shared_dirty = shared_dirty  # pylint: disable=protected-access
         proc._swap = swap  # pylint: disable=protected-access
         proc._num_fds = num_fds  # pylint: disable=protected-access
-        # proc._ios = ios
+        #proc._ios = ios
         proc._num_threads = num_threads  # pylint: disable=protected-access
         proc._num_children = num_children  # pylint: disable=protected-access
         if FLAGS.process_cpu:
@@ -484,9 +515,11 @@ class ResourceMon(object):
         csv_writer = csv.writer(out, lineterminator="\n")
 
         # Header.
-        header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", "uss(kB)",
-                  "rss(kB)", "vms(kB)", "swap(kB)", "num_fds", "num_threads",
-                  "num_children", "timestamp"]
+        header = ["ip", "uid", "pid", "ppid", "name", "pss(kB)", #"uss(kB)",
+                  "rss(kB)", "vms(kB)", "private_clean(kB)",
+                  "private_dirty(kB)", "shared_clean(kB)", "shared_dirty(kB)",
+                  "swap(kB)", "num_fds", "num_threads", "num_children",
+                  "timestamp"]
         if FLAGS.process_cpu:
           # Insert in the 2nd last position before timestamp.
           header.insert(-1, "cpu_percent")
@@ -505,9 +538,11 @@ class ResourceMon(object):
 
         for proc in procs:
           row = [self.__svm_ip, proc._username, proc.pid, proc._ppid,
-                 proc._name, proc._pss, proc._uss, proc._rss, proc._vms,
-                 proc._swap, proc._num_fds, proc._num_threads,
-                 proc._num_children, proc._timestamp]
+                 proc._name, proc._pss, #proc._uss,
+                 proc._rss, proc._vms, proc._pvt_clean, proc._pvt_dirty,
+                 proc._shared_clean, proc._shared_dirty, proc._swap,
+                 proc._num_fds, proc._num_threads, proc._num_children,
+                 proc._timestamp]
           if FLAGS.process_cpu:
             # Insert in the 2nd last position before timestamp.
             row.insert(-1, proc._cpu_percent)
